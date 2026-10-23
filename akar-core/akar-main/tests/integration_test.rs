@@ -1221,15 +1221,14 @@ fn test_ddl_pipeline_create_drop_index() {
 
     exec(&conn, "CREATE NODE TABLE User(id INT64, name STRING, PRIMARY KEY (id))");
 
-    // CREATE NODE TABLE auto-creates an ART index.
-    // Trying to create another should fail.
+    // CREATE ART INDEX on PK should fail (FR-001: secondary indexes must be on non-PK columns).
     let err = exec_err(&conn, "CREATE ART INDEX user_idx FOR (u:User) ON (u.id)");
     assert!(
-        err.contains("already has"),
-        "Expected 'already has' ART index, got: {err}"
+        err.contains("primary key"),
+        "Expected 'primary key' error, got: {err}"
     );
 
-    // Insert data and verify table works with auto-created index
+    // Insert data and verify table works with PK index
     exec(&conn, "CREATE (u:User {id: 1, name: 'Alice'})");
     let result = conn.query("MATCH (u:User) RETURN u.name").unwrap();
     assert!(result.is_success());

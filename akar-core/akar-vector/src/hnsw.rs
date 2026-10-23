@@ -72,7 +72,7 @@ pub enum DistanceMetric {
 impl DistanceMetric {
     /// Compute the distance between two vectors using this metric.
     /// Returns a non-negative value where *smaller* means more similar.
-    pub fn compute(&self, a: &[f64], b: &[f64]) -> f64 {
+    pub fn compute(&self, a: &[f32], b: &[f32]) -> f32 {
         match self {
             // All kernels are runtime-dispatched SIMD with scalar fallback,
             // preserving the exact scalar maths of the previous inlined
@@ -95,11 +95,11 @@ impl DistanceMetric {
 
 /// A `(distance, node_id)` pair with a total order for use in HNSW heaps.
 ///
-/// `f64` does not implement `Ord`/`Eq`, so this wrapper gives the beam-search
+/// `f32` does not implement `Ord`/`Eq`, so this wrapper gives the beam-search
 /// heaps a total order based on `total_cmp` (ties broken by node id for
 /// determinism) (P51.16).
 #[derive(Debug, Clone, Copy)]
-struct Candidate(f64, usize);
+struct Candidate(f32, usize);
 
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -125,7 +125,7 @@ impl Eq for Candidate {}
 #[derive(Debug, Clone)]
 struct HnswNode {
     /// The vector data.
-    vector: Vec<f64>,
+    vector: Vec<f32>,
     /// Connections per layer: `connections[level]` = list of node IDs.
     connections: Vec<Vec<usize>>,
 }
@@ -199,7 +199,7 @@ impl HnswIndex {
     }
 
     /// Get a reference to the vectors stored in the index, ordered by node id.
-    pub fn vectors(&self) -> Vec<&[f64]> {
+    pub fn vectors(&self) -> Vec<&[f32]> {
         let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self.nodes.iter().collect();
         sorted_nodes.sort_by_key(|&(id, _)| id);
         sorted_nodes.into_iter().map(|(_, n)| n.vector.as_slice()).collect()
@@ -209,7 +209,7 @@ impl HnswIndex {
     ///
     /// The node id is the caller-supplied id (row offset in the calling
     /// table), so it is preserved across persist/load (P51.17).
-    pub fn nodes(&self) -> Vec<(usize, &[f64])> {
+    pub fn nodes(&self) -> Vec<(usize, &[f32])> {
         let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self.nodes.iter().collect();
         sorted_nodes.sort_by_key(|&(id, _)| id);
         sorted_nodes
@@ -234,17 +234,17 @@ impl HnswIndex {
     }
 
     /// Compute distance between the vector at `node_id` and a query vector.
-    fn node_distance(&self, node_id: usize, query: &[f64]) -> f64 {
+    fn node_distance(&self, node_id: usize, query: &[f32]) -> f32 {
         if let Some(node) = self.nodes.get(&node_id) {
             self.metric.compute(&node.vector, query)
         } else {
-            f64::INFINITY
+            f32::INFINITY
         }
     }
 
     /// Greedy search from a given entry point to find the closest node
     /// to the query at the specified layer. Returns the closest node ID.
-    fn greedy_search_at_layer(&self, entry: usize, query: &[f64], layer: usize) -> usize {
+    fn greedy_search_at_layer(&self, entry: usize, query: &[f32], layer: usize) -> usize {
         let mut current = entry;
         let mut current_node = match self.nodes.get(&current) {
             Some(n) => n,
@@ -296,7 +296,7 @@ impl HnswIndex {
     ///
     /// `layer` selects the connection set used for expansion (insert searches
     /// each layer separately; `search()` always uses layer 0).
-    fn search_layer_0(&self, entry: usize, query: &[f64], layer: usize, k: usize, ef: usize) -> Vec<(f64, usize)> {
+    fn search_layer_0(&self, entry: usize, query: &[f32], layer: usize, k: usize, ef: usize) -> Vec<(f32, usize)> {
         if k == 0 {
             return Vec::new();
         }
@@ -374,7 +374,7 @@ impl HnswIndex {
     }
 
     /// Select the `M` closest neighbours from a pre-sorted candidate list.
-    fn select_neighbors_simple(candidates: &[(f64, usize)], m: usize) -> Vec<usize> {
+    fn select_neighbors_simple(candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
         candidates.iter().take(m).map(|&(_, id)| id).collect()
     }
 
@@ -386,7 +386,7 @@ impl HnswIndex {
     /// preserved verbatim: the node is stored under `id`, and `search`
     /// returns `id` for it. Node ids may be sparse (P51.17) — callers pass
     /// their own row ids so a search result always addresses the same row.
-    pub fn insert(&mut self, vector: Vec<f64>, id: usize) {
+    pub fn insert(&mut self, vector: Vec<f32>, id: usize) {
         let new_level = if self.nodes.is_empty() {
             MAX_M // First node goes to max level
         } else {
@@ -459,7 +459,7 @@ impl HnswIndex {
 
                 let d = self.metric.compute(&vector, neighbor_vec);
 
-                let mut worst_d = f64::NEG_INFINITY;
+                let mut worst_d = f32::NEG_INFINITY;
                 let mut worst_idx = 0;
                 let mut has_worst = false;
 
@@ -504,7 +504,7 @@ impl HnswIndex {
     ///
     /// Returns a list of `(distance, node_id)` pairs sorted by distance
     /// (closest first).
-    pub fn search(&self, query: &[f64], k: usize) -> Vec<(f64, usize)> {
+    pub fn search(&self, query: &[f32], k: usize) -> Vec<(f32, usize)> {
         self.search_with_ef(query, k, EF_SEARCH)
     }
 
@@ -521,7 +521,7 @@ impl HnswIndex {
     ///
     /// Returns an empty vec when the index is empty, when `k == 0`, or when
     /// `ef == 0`.
-    pub fn search_with_ef(&self, query: &[f64], k: usize, ef: usize) -> Vec<(f64, usize)> {
+    pub fn search_with_ef(&self, query: &[f32], k: usize, ef: usize) -> Vec<(f32, usize)> {
         if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 || ef == 0 {
             return Vec::new();
         }
@@ -539,7 +539,7 @@ impl HnswIndex {
     }
 
     /// Get a reference to a specific node's vector.
-    pub fn get_vector(&self, id: usize) -> Option<&[f64]> {
+    pub fn get_vector(&self, id: usize) -> Option<&[f32]> {
         self.nodes.get(&id).map(|n| n.vector.as_slice())
     }
 
@@ -562,7 +562,7 @@ impl HnswIndex {
             avg_degree: if self.nodes.is_empty() {
                 0.0
             } else {
-                total_connections as f64 / self.nodes.len() as f64
+                total_connections as f32 / self.nodes.len() as f32
             },
         }
     }
@@ -574,7 +574,7 @@ pub struct HnswStats {
     pub num_vectors: usize,
     pub max_level: usize,
     pub total_connections: usize,
-    pub avg_degree: f64,
+    pub avg_degree: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -585,11 +585,11 @@ pub struct HnswStats {
 mod tests {
     use super::*;
 
-    fn random_vector(rng: &mut u64, dims: usize) -> Vec<f64> {
+    fn random_vector(rng: &mut u64, dims: usize) -> Vec<f32> {
         (0..dims)
             .map(|_| {
                 *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                ((*rng >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0
+                ((*rng >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0
             })
             .collect()
     }
@@ -607,7 +607,7 @@ mod tests {
         // P52.29: k=0 used to underflow `results[k - 1]` and panic.
         let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
         for i in 0..20 {
-            idx.insert(vec![i as f64, i as f64], i);
+            idx.insert(vec![i as f32, i as f32], i);
         }
         assert!(idx.search(&[0.0, 0.0], 0).is_empty());
     }
@@ -641,7 +641,7 @@ mod tests {
     fn test_search_returns_k_results() {
         let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
         for i in 0..20 {
-            let v = vec![i as f64 * 10.0, i as f64 * 10.0];
+            let v = vec![i as f32 * 10.0, i as f32 * 10.0];
             idx.insert(v, i);
         }
 
@@ -655,7 +655,7 @@ mod tests {
 
     /// Build a navigable HNSW over `n` dense random vectors of dimension `dims`,
     /// plus the query, returning the index and the query vector.
-    fn dense_index(n: usize, dims: usize, seed: u64) -> (HnswIndex, Vec<f64>) {
+    fn dense_index(n: usize, dims: usize, seed: u64) -> (HnswIndex, Vec<f32>) {
         let mut rng = seed;
         let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
         for id in 0..n {
@@ -666,8 +666,8 @@ mod tests {
     }
 
     /// The exact top-`k` by full scan — the ground truth the ANN must approach.
-    fn exact_top_k(idx: &HnswIndex, query: &[f64], k: usize) -> Vec<usize> {
-        let mut all: Vec<(f64, usize)> = idx
+    fn exact_top_k(idx: &HnswIndex, query: &[f32], k: usize) -> Vec<usize> {
+        let mut all: Vec<(f32, usize)> = idx
             .nodes()
             .into_iter()
             .map(|(id, v)| (DistanceMetric::Euclidean.compute(v, query), id))
@@ -677,9 +677,9 @@ mod tests {
         all.into_iter().map(|(_, id)| id).collect()
     }
 
-    fn overlap_at_k(got: &[(f64, usize)], want: &[usize], k: usize) -> f64 {
+    fn overlap_at_k(got: &[(f32, usize)], want: &[usize], k: usize) -> f32 {
         let hit = got.iter().take(k).filter(|(_, id)| want.contains(id)).count();
-        hit as f64 / k.max(1) as f64
+        hit as f32 / k.max(1) as f32
     }
 
     /// T052: the beam width must actually widen the candidate pool.
@@ -699,7 +699,7 @@ mod tests {
         let wide = overlap_at_k(&idx.search_with_ef(&query, k, 400), &exact, k);
 
         assert!(
-            wide + 1e-9 >= narrow,
+            wide + 1e-5 >= narrow,
             "a wider beam must not lose recall: narrow ef={k} gave overlap {narrow}, \
              wide ef=400 gave overlap {wide}"
         );
@@ -725,7 +725,7 @@ mod tests {
         let wide = overlap_at_k(&idx.search_with_ef(&query, k, 500), &exact, k);
 
         assert!(
-            wide + 1e-9 >= narrow,
+            wide + 1e-5 >= narrow,
             "widening the beam must not reduce overlap (ef=10: {narrow}, ef=500: {wide})"
         );
     }
@@ -811,7 +811,7 @@ mod tests {
 
         let euc = DistanceMetric::Euclidean.compute(&a, &b);
         assert!(
-            (euc - 2.0_f64.sqrt()).abs() < 0.01,
+            (euc - 2.0_f32.sqrt()).abs() < 0.01,
             "Euclidean distance ≈ √2, got {euc}"
         );
 
@@ -833,10 +833,10 @@ mod tests {
         let base = DistanceMetric::Cosine.compute(&query, &stored);
 
         for scale in [0.5, 2.0, 10.0, 0.001] {
-            let scaled: Vec<f64> = stored.iter().map(|x| x * scale).collect();
+            let scaled: Vec<f32> = stored.iter().map(|x| x * scale).collect();
             let d = DistanceMetric::Cosine.compute(&query, &scaled);
             assert!(
-                (d - base).abs() < 1e-9,
+                (d - base).abs() < 1e-5,
                 "cosine distance must be scale-invariant: {base} vs {d} (scale={scale})"
             );
         }
@@ -864,13 +864,13 @@ mod tests {
         assert_eq!(idx.len(), num_vectors);
 
         // Test recall against brute-force for several queries
-        let vectors: Vec<Vec<f64>> = (0..num_vectors).map(|i| idx.get_vector(i).unwrap().to_vec()).collect();
+        let vectors: Vec<Vec<f32>> = (0..num_vectors).map(|i| idx.get_vector(i).unwrap().to_vec()).collect();
 
         for test_idx in 0..10 {
             let query = random_vector(&mut rng, dims);
 
             // Brute-force top-10
-            let mut bf: Vec<(f64, usize)> = vectors
+            let mut bf: Vec<(f32, usize)> = vectors
                 .iter()
                 .enumerate()
                 .map(|(i, v)| (DistanceMetric::Euclidean.compute(&query, v), i))
@@ -884,7 +884,7 @@ mod tests {
 
             // Compute recall
             let intersection = bf_top10.intersection(&hnsw_top10).count();
-            let recall = intersection as f64 / 10.0;
+            let recall = intersection as f32 / 10.0;
             assert!(
                 recall > 0.85,
                 "Recall too low: {recall} (test {test_idx}, expected > 0.85)"
@@ -933,7 +933,7 @@ mod tests {
         }
 
         // Test recall for 20 random queries
-        let vectors: Vec<Vec<f64>> = (0..num_vectors).map(|i| idx.get_vector(i).unwrap().to_vec()).collect();
+        let vectors: Vec<Vec<f32>> = (0..num_vectors).map(|i| idx.get_vector(i).unwrap().to_vec()).collect();
 
         let mut total_recall = 0.0;
         let num_queries = 20;
@@ -941,7 +941,7 @@ mod tests {
         for _ in 0..num_queries {
             let query = random_vector(&mut rng, dims);
 
-            let mut bf: Vec<(f64, usize)> = vectors
+            let mut bf: Vec<(f32, usize)> = vectors
                 .iter()
                 .enumerate()
                 .map(|(i, v)| (DistanceMetric::Euclidean.compute(&query, v), i))
@@ -953,10 +953,10 @@ mod tests {
             let hnsw_top10: AHashSet<usize> = hnsw.iter().map(|(_, id)| *id).collect();
 
             let intersection = bf_top10.intersection(&hnsw_top10).count();
-            total_recall += intersection as f64 / 10.0;
+            total_recall += intersection as f32 / 10.0;
         }
 
-        let avg_recall = total_recall / num_queries as f64;
+        let avg_recall = total_recall / num_queries as f32;
         assert!(
             avg_recall > 0.95,
             "Average recall too low: {avg_recall} (expected > 0.95)"
@@ -987,7 +987,7 @@ mod tests {
     fn test_stats_report() {
         let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
         for i in 0..50 {
-            idx.insert(vec![i as f64, i as f64], i);
+            idx.insert(vec![i as f32, i as f32], i);
         }
         let stats = idx.stats();
         assert_eq!(stats.num_vectors, 50);

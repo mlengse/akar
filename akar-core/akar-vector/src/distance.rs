@@ -29,7 +29,7 @@ pub const MIN_DIM_AVX: usize = 32;
 /// Returns `(dot, sq_norm_a, sq_norm_b)`. Operands with unequal length yield
 /// `(0.0, 0.0, 0.0)`.
 #[inline]
-pub fn dot_and_sq_norms_scalar(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
+pub fn dot_and_sq_norms_scalar(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
     let mut dot = 0.0;
     let mut sq_a = 0.0;
     let mut sq_b = 0.0;
@@ -43,13 +43,13 @@ pub fn dot_and_sq_norms_scalar(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
 
 /// Squared L2 distance — sum of squared elementwise differences.
 #[inline]
-pub fn l2_squared_scalar(a: &[f64], b: &[f64]) -> f64 {
+pub fn l2_squared_scalar(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum()
 }
 
 /// L1 distance — sum of absolute elementwise differences.
 #[inline]
-pub fn l1_distance_scalar(a: &[f64], b: &[f64]) -> f64 {
+pub fn l1_distance_scalar(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
 }
 
@@ -61,38 +61,45 @@ pub fn l1_distance_scalar(a: &[f64], b: &[f64]) -> f64 {
 mod sse2 {
     use std::arch::x86_64::*;
 
-    /// Horizontal sum of a 2-lane PD vector.
+    /// Horizontal sum of a 4-lane PS vector using only SSE2 instructions.
     #[inline]
-    pub(crate) unsafe fn hsum_pd(v: __m128d) -> f64 {
+    pub(crate) unsafe fn hsum_ps(v: __m128) -> f32 {
         unsafe {
-            let hi = _mm_unpackhi_pd(v, v);
-            _mm_cvtsd_f64(_mm_add_sd(v, hi))
+            // s1 = [v0+v2, v1+v3, ...]  (_mm_movehl_ps is SSE2)
+            let s1 = _mm_add_ps(v, _mm_movehl_ps(v, v));
+            // s2[0] = s1[0] + s1[1] = v0+v1+v2+v3
+            _mm_cvtss_f32(_mm_add_ss(
+                s1,
+                _mm_shuffle_ps(s1, s1, 0x01),
+            ))
         }
     }
 
-    /// SSE2 single-pass dot + squared norms.
+    /// SSE2 single-pass dot + squared norms (f32).
     ///
     /// # Safety
     ///
     /// The CPU must support SSE2 and `a`/`b` must have equal, non-empty
     /// length.
     #[target_feature(enable = "sse2")]
-    pub(crate) unsafe fn dot_and_sq_norms(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
-        let chunks = a.len() / 2;
-        let mut dot = _mm_setzero_pd();
-        let mut sq_a = _mm_setzero_pd();
-        let mut sq_b = _mm_setzero_pd();
+    pub(crate) unsafe fn dot_and_sq_norms(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
+        let chunks = a.len() / 4;
+        let mut dot = _mm_setzero_ps();
+        let mut sq_a = _mm_setzero_ps();
+        let mut sq_b = _mm_setzero_ps();
         for i in 0..chunks {
-            let x = unsafe { _mm_loadu_pd(a.as_ptr().add(i * 2)) };
-            let y = unsafe { _mm_loadu_pd(b.as_ptr().add(i * 2)) };
-            dot = _mm_add_pd(dot, _mm_mul_pd(x, y));
-            sq_a = _mm_add_pd(sq_a, _mm_mul_pd(x, x));
-            sq_b = _mm_add_pd(sq_b, _mm_mul_pd(y, y));
+            let x = unsafe { _mm_loadu_ps(a.as_ptr().add(i * 4)) };
+            let y = unsafe { _mm_loadu_ps(b.as_ptr().add(i * 4)) };
+            dot = _mm_add_ps(dot, _mm_mul_ps(x, y));
+            sq_a = _mm_add_ps(sq_a, _mm_mul_ps(x, x));
+            sq_b = _mm_add_ps(sq_b, _mm_mul_ps(y, y));
         }
-        let mut acc = (unsafe { hsum_pd(dot) }, unsafe { hsum_pd(sq_a) }, unsafe {
-            hsum_pd(sq_b)
-        });
-        for (x, y) in a[chunks * 2..].iter().zip(b[chunks * 2..].iter()) {
+        let mut acc = (
+            unsafe { hsum_ps(dot) },
+            unsafe { hsum_ps(sq_a) },
+            unsafe { hsum_ps(sq_b) },
+        );
+        for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
             acc.0 += x * y;
             acc.1 += x * x;
             acc.2 += y * y;
@@ -100,49 +107,49 @@ mod sse2 {
         acc
     }
 
-    /// SSE2 squared L2 distance.
+    /// SSE2 squared L2 distance (f32).
     ///
     /// # Safety
     ///
     /// The CPU must support SSE2 and `a`/`b` must have equal, non-empty
     /// length.
     #[target_feature(enable = "sse2")]
-    pub(crate) unsafe fn l2_squared(a: &[f64], b: &[f64]) -> f64 {
-        let chunks = a.len() / 2;
-        let mut acc = _mm_setzero_pd();
+    pub(crate) unsafe fn l2_squared(a: &[f32], b: &[f32]) -> f32 {
+        let chunks = a.len() / 4;
+        let mut acc = _mm_setzero_ps();
         for i in 0..chunks {
-            let x = unsafe { _mm_loadu_pd(a.as_ptr().add(i * 2)) };
-            let y = unsafe { _mm_loadu_pd(b.as_ptr().add(i * 2)) };
-            let d = _mm_sub_pd(x, y);
-            acc = _mm_add_pd(acc, _mm_mul_pd(d, d));
+            let x = unsafe { _mm_loadu_ps(a.as_ptr().add(i * 4)) };
+            let y = unsafe { _mm_loadu_ps(b.as_ptr().add(i * 4)) };
+            let d = _mm_sub_ps(x, y);
+            acc = _mm_add_ps(acc, _mm_mul_ps(d, d));
         }
-        let mut sum = unsafe { hsum_pd(acc) };
-        for (x, y) in a[chunks * 2..].iter().zip(b[chunks * 2..].iter()) {
+        let mut sum = unsafe { hsum_ps(acc) };
+        for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
             let d = x - y;
             sum += d * d;
         }
         sum
     }
 
-    /// SSE2 L1 distance.
+    /// SSE2 L1 distance (f32).
     ///
     /// # Safety
     ///
     /// The CPU must support SSE2 and `a`/`b` must have equal, non-empty
     /// length.
     #[target_feature(enable = "sse2")]
-    pub(crate) unsafe fn l1_distance(a: &[f64], b: &[f64]) -> f64 {
-        let chunks = a.len() / 2;
-        let mut acc = _mm_setzero_pd();
-        let sign = _mm_set1_pd(-0.0);
+    pub(crate) unsafe fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
+        let chunks = a.len() / 4;
+        let mut acc = _mm_setzero_ps();
+        let sign = _mm_set1_ps(-0.0);
         for i in 0..chunks {
-            let x = unsafe { _mm_loadu_pd(a.as_ptr().add(i * 2)) };
-            let y = unsafe { _mm_loadu_pd(b.as_ptr().add(i * 2)) };
-            let d = _mm_sub_pd(x, y);
-            acc = _mm_add_pd(acc, _mm_andnot_pd(sign, d));
+            let x = unsafe { _mm_loadu_ps(a.as_ptr().add(i * 4)) };
+            let y = unsafe { _mm_loadu_ps(b.as_ptr().add(i * 4)) };
+            let d = _mm_sub_ps(x, y);
+            acc = _mm_add_ps(acc, _mm_andnot_ps(sign, d));
         }
-        let mut sum = unsafe { hsum_pd(acc) };
-        for (x, y) in a[chunks * 2..].iter().zip(b[chunks * 2..].iter()) {
+        let mut sum = unsafe { hsum_ps(acc) };
+        for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
             sum += (x - y).abs();
         }
         sum
@@ -154,18 +161,18 @@ mod avx {
     use super::*;
     use std::arch::x86_64::*;
 
-    /// Horizontal sum of a 4-lane PD vector: reduce to 128-bit then use the
+    /// Horizontal sum of an 8-lane PS vector: reduce to 128-bit then use the
     /// SSE2 horizontal sum.
     #[inline]
-    pub(crate) unsafe fn hsum256_pd(v: __m256d) -> f64 {
+    pub(crate) unsafe fn hsum256_ps(v: __m256) -> f32 {
         unsafe {
-            let lo = _mm256_castpd256_pd128(v);
-            let hi = _mm256_extractf128_pd(v, 1);
-            sse2::hsum_pd(_mm_add_pd(lo, hi))
+            let lo = _mm256_castps256_ps128(v);
+            let hi = _mm256_extractf128_ps(v, 1);
+            sse2::hsum_ps(_mm_add_ps(lo, hi))
         }
     }
 
-    /// AVX single-pass dot + squared norms. Scalar path handles the ≤3-lane
+    /// AVX single-pass dot + squared norms (f32). Scalar path handles the ≤7-lane
     /// tail.
     ///
     /// # Safety
@@ -173,22 +180,24 @@ mod avx {
     /// The CPU must support AVX and `a`/`b` must have equal, non-empty
     /// length.
     #[target_feature(enable = "avx")]
-    pub(crate) unsafe fn dot_and_sq_norms(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
-        let chunks = a.len() / 4;
-        let mut dot = _mm256_setzero_pd();
-        let mut sq_a = _mm256_setzero_pd();
-        let mut sq_b = _mm256_setzero_pd();
+    pub(crate) unsafe fn dot_and_sq_norms(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
+        let chunks = a.len() / 8;
+        let mut dot = _mm256_setzero_ps();
+        let mut sq_a = _mm256_setzero_ps();
+        let mut sq_b = _mm256_setzero_ps();
         for i in 0..chunks {
-            let x = unsafe { _mm256_loadu_pd(a.as_ptr().add(i * 4)) };
-            let y = unsafe { _mm256_loadu_pd(b.as_ptr().add(i * 4)) };
-            dot = _mm256_add_pd(dot, _mm256_mul_pd(x, y));
-            sq_a = _mm256_add_pd(sq_a, _mm256_mul_pd(x, x));
-            sq_b = _mm256_add_pd(sq_b, _mm256_mul_pd(y, y));
+            let x = unsafe { _mm256_loadu_ps(a.as_ptr().add(i * 8)) };
+            let y = unsafe { _mm256_loadu_ps(b.as_ptr().add(i * 8)) };
+            dot = _mm256_add_ps(dot, _mm256_mul_ps(x, y));
+            sq_a = _mm256_add_ps(sq_a, _mm256_mul_ps(x, x));
+            sq_b = _mm256_add_ps(sq_b, _mm256_mul_ps(y, y));
         }
-        let mut acc = (unsafe { hsum256_pd(dot) }, unsafe { hsum256_pd(sq_a) }, unsafe {
-            hsum256_pd(sq_b)
-        });
-        for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
+        let mut acc = (
+            unsafe { hsum256_ps(dot) },
+            unsafe { hsum256_ps(sq_a) },
+            unsafe { hsum256_ps(sq_b) },
+        );
+        for (x, y) in a[chunks * 8..].iter().zip(b[chunks * 8..].iter()) {
             acc.0 += x * y;
             acc.1 += x * x;
             acc.2 += y * y;
@@ -196,49 +205,49 @@ mod avx {
         acc
     }
 
-    /// AVX squared L2 distance.
+    /// AVX squared L2 distance (f32).
     ///
     /// # Safety
     ///
     /// The CPU must support AVX and `a`/`b` must have equal, non-empty
     /// length.
     #[target_feature(enable = "avx")]
-    pub(crate) unsafe fn l2_squared(a: &[f64], b: &[f64]) -> f64 {
-        let chunks = a.len() / 4;
-        let mut acc = _mm256_setzero_pd();
+    pub(crate) unsafe fn l2_squared(a: &[f32], b: &[f32]) -> f32 {
+        let chunks = a.len() / 8;
+        let mut acc = _mm256_setzero_ps();
         for i in 0..chunks {
-            let x = unsafe { _mm256_loadu_pd(a.as_ptr().add(i * 4)) };
-            let y = unsafe { _mm256_loadu_pd(b.as_ptr().add(i * 4)) };
-            let d = _mm256_sub_pd(x, y);
-            acc = _mm256_add_pd(acc, _mm256_mul_pd(d, d));
+            let x = unsafe { _mm256_loadu_ps(a.as_ptr().add(i * 8)) };
+            let y = unsafe { _mm256_loadu_ps(b.as_ptr().add(i * 8)) };
+            let d = _mm256_sub_ps(x, y);
+            acc = _mm256_add_ps(acc, _mm256_mul_ps(d, d));
         }
-        let mut sum = unsafe { hsum256_pd(acc) };
-        for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
+        let mut sum = unsafe { hsum256_ps(acc) };
+        for (x, y) in a[chunks * 8..].iter().zip(b[chunks * 8..].iter()) {
             let d = x - y;
             sum += d * d;
         }
         sum
     }
 
-    /// AVX L1 distance (absolute differences via sign-masking).
+    /// AVX L1 distance (absolute differences via sign-masking, f32).
     ///
     /// # Safety
     ///
     /// The CPU must support AVX and `a`/`b` must have equal, non-empty
     /// length.
     #[target_feature(enable = "avx")]
-    pub(crate) unsafe fn l1_distance(a: &[f64], b: &[f64]) -> f64 {
-        let chunks = a.len() / 4;
-        let mut acc = _mm256_setzero_pd();
-        let sign = _mm256_set1_pd(-0.0);
+    pub(crate) unsafe fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
+        let chunks = a.len() / 8;
+        let mut acc = _mm256_setzero_ps();
+        let sign = _mm256_set1_ps(-0.0);
         for i in 0..chunks {
-            let x = unsafe { _mm256_loadu_pd(a.as_ptr().add(i * 4)) };
-            let y = unsafe { _mm256_loadu_pd(b.as_ptr().add(i * 4)) };
-            let d = _mm256_sub_pd(x, y);
-            acc = _mm256_add_pd(acc, _mm256_andnot_pd(sign, d));
+            let x = unsafe { _mm256_loadu_ps(a.as_ptr().add(i * 8)) };
+            let y = unsafe { _mm256_loadu_ps(b.as_ptr().add(i * 8)) };
+            let d = _mm256_sub_ps(x, y);
+            acc = _mm256_add_ps(acc, _mm256_andnot_ps(sign, d));
         }
-        let mut sum = unsafe { hsum256_pd(acc) };
-        for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
+        let mut sum = unsafe { hsum256_ps(acc) };
+        for (x, y) in a[chunks * 8..].iter().zip(b[chunks * 8..].iter()) {
             sum += (x - y).abs();
         }
         sum
@@ -267,29 +276,29 @@ mod neon {
     use super::*;
     use std::arch::aarch64::*;
 
-    /// NEON single-pass dot + squared norms (2 × f64 per vector).
-    pub(crate) fn dot_and_sq_norms(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
+    /// NEON single-pass dot + squared norms (4 × f32 per vector).
+    pub(crate) fn dot_and_sq_norms(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
         debug_assert_eq!(a.len(), b.len(), "NEON kernels require equal-length operands");
         debug_assert!(a.len() >= MIN_DIM_SIMD, "NEON kernels are the >= MIN_DIM_SIMD path");
-        let chunks = a.len() / 2;
+        let chunks = a.len() / 4;
         // SAFETY: `neon` is statically enabled for every aarch64 target, and each
-        // 2-lane load reads at `i * 2 < chunks * 2 <= a.len() == b.len()`, so both
+        // 4-lane load reads at `i * 4 < chunks * 4 <= a.len() == b.len()`, so both
         // slices stay in bounds for the whole loop.
         let mut acc = unsafe {
-            let mut dot = vdupq_n_f64(0.0);
-            let mut sq_a = vdupq_n_f64(0.0);
-            let mut sq_b = vdupq_n_f64(0.0);
+            let mut dot = vdupq_n_f32(0.0);
+            let mut sq_a = vdupq_n_f32(0.0);
+            let mut sq_b = vdupq_n_f32(0.0);
             for i in 0..chunks {
-                let x = vld1q_f64(a.as_ptr().add(i * 2));
-                let y = vld1q_f64(b.as_ptr().add(i * 2));
-                dot = vaddq_f64(dot, vmulq_f64(x, y));
-                sq_a = vaddq_f64(sq_a, vmulq_f64(x, x));
-                sq_b = vaddq_f64(sq_b, vmulq_f64(y, y));
+                let x = vld1q_f32(a.as_ptr().add(i * 4));
+                let y = vld1q_f32(b.as_ptr().add(i * 4));
+                dot = vaddq_f32(dot, vmulq_f32(x, y));
+                sq_a = vaddq_f32(sq_a, vmulq_f32(x, x));
+                sq_b = vaddq_f32(sq_b, vmulq_f32(y, y));
             }
-            (vaddvq_f64(dot), vaddvq_f64(sq_a), vaddvq_f64(sq_b))
+            (vaddvq_f32(dot), vaddvq_f32(sq_a), vaddvq_f32(sq_b))
         };
         // Scalar tail for an odd element count.
-        for (x, y) in a[chunks * 2..].iter().zip(&b[chunks * 2..]) {
+        for (x, y) in a[chunks * 4..].iter().zip(&b[chunks * 4..]) {
             acc.0 += x * y;
             acc.1 += x * x;
             acc.2 += y * y;
@@ -298,44 +307,44 @@ mod neon {
     }
 
     /// NEON squared L2 distance.
-    pub(crate) fn l2_squared(a: &[f64], b: &[f64]) -> f64 {
+    pub(crate) fn l2_squared(a: &[f32], b: &[f32]) -> f32 {
         debug_assert_eq!(a.len(), b.len(), "NEON kernels require equal-length operands");
         debug_assert!(a.len() >= MIN_DIM_SIMD, "NEON kernels are the >= MIN_DIM_SIMD path");
-        let chunks = a.len() / 2;
+        let chunks = a.len() / 4;
         // SAFETY: as in `dot_and_sq_norms` — statically enabled feature, loads in bounds.
         let mut sum = unsafe {
-            let mut acc = vdupq_n_f64(0.0);
+            let mut acc = vdupq_n_f32(0.0);
             for i in 0..chunks {
-                let x = vld1q_f64(a.as_ptr().add(i * 2));
-                let y = vld1q_f64(b.as_ptr().add(i * 2));
-                let d = vsubq_f64(x, y);
-                acc = vaddq_f64(acc, vmulq_f64(d, d));
+                let x = vld1q_f32(a.as_ptr().add(i * 4));
+                let y = vld1q_f32(b.as_ptr().add(i * 4));
+                let d = vsubq_f32(x, y);
+                acc = vaddq_f32(acc, vmulq_f32(d, d));
             }
-            vaddvq_f64(acc)
+            vaddvq_f32(acc)
         };
-        for (x, y) in a[chunks * 2..].iter().zip(&b[chunks * 2..]) {
+        for (x, y) in a[chunks * 4..].iter().zip(&b[chunks * 4..]) {
             let d = x - y;
             sum += d * d;
         }
         sum
     }
 
-    /// NEON L1 distance (absolute differences via `vabsq_f64`).
-    pub(crate) fn l1_distance(a: &[f64], b: &[f64]) -> f64 {
+    /// NEON L1 distance (absolute differences via `vabsq_f32`).
+    pub(crate) fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
         debug_assert_eq!(a.len(), b.len(), "NEON kernels require equal-length operands");
         debug_assert!(a.len() >= MIN_DIM_SIMD, "NEON kernels are the >= MIN_DIM_SIMD path");
-        let chunks = a.len() / 2;
+        let chunks = a.len() / 4;
         // SAFETY: as in `dot_and_sq_norms` — statically enabled feature, loads in bounds.
         let mut sum = unsafe {
-            let mut acc = vdupq_n_f64(0.0);
+            let mut acc = vdupq_n_f32(0.0);
             for i in 0..chunks {
-                let x = vld1q_f64(a.as_ptr().add(i * 2));
-                let y = vld1q_f64(b.as_ptr().add(i * 2));
-                acc = vaddq_f64(acc, vabsq_f64(vsubq_f64(x, y)));
+                let x = vld1q_f32(a.as_ptr().add(i * 4));
+                let y = vld1q_f32(b.as_ptr().add(i * 4));
+                acc = vaddq_f32(acc, vabsq_f32(vsubq_f32(x, y)));
             }
-            vaddvq_f64(acc)
+            vaddvq_f32(acc)
         };
-        for (x, y) in a[chunks * 2..].iter().zip(&b[chunks * 2..]) {
+        for (x, y) in a[chunks * 4..].iter().zip(&b[chunks * 4..]) {
             sum += (x - y).abs();
         }
         sum
@@ -351,7 +360,7 @@ mod neon {
 /// Picks AVX (when ≥[`MIN_DIM_AVX`]), else SSE2/NEON (when ≥[`MIN_DIM_SIMD`]),
 /// else the scalar kernel. Unequal/empty operands return `(0.0, 0.0, 0.0)`.
 #[inline]
-pub fn dot_and_sq_norms(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
+pub fn dot_and_sq_norms(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
     if a.len() != b.len() || a.is_empty() {
         return (0.0, 0.0, 0.0);
     }
@@ -376,7 +385,7 @@ pub fn dot_and_sq_norms(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
 
 /// Dispatched squared L2 distance. Unequal/empty operands return `0.0`.
 #[inline]
-pub fn l2_squared(a: &[f64], b: &[f64]) -> f64 {
+pub fn l2_squared(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
@@ -401,7 +410,7 @@ pub fn l2_squared(a: &[f64], b: &[f64]) -> f64 {
 
 /// Dispatched L1 distance. Unequal/empty operands return `0.0`.
 #[inline]
-pub fn l1_distance(a: &[f64], b: &[f64]) -> f64 {
+pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
@@ -431,7 +440,7 @@ pub fn l1_distance(a: &[f64], b: &[f64]) -> f64 {
 /// Cosine similarity — `dot / (||a|| * ||b||)`. Returns `0.0` for zero-norm
 /// or shape-mismatched operands.
 #[inline]
-pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let (dot, sq_a, sq_b) = dot_and_sq_norms(a, b);
     if sq_a == 0.0 || sq_b == 0.0 {
         return 0.0;
@@ -442,25 +451,25 @@ pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
 /// Cosine distance `1 - cos(a, b)` — the "smaller = more similar" convention
 /// used by [`crate::hnsw::DistanceMetric::Cosine`].
 #[inline]
-pub fn cosine_distance(a: &[f64], b: &[f64]) -> f64 {
+pub fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
     1.0 - cosine_similarity(a, b)
 }
 
 /// Dot product of two vectors.
 #[inline]
-pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
+pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     dot_and_sq_norms(a, b).0
 }
 
 /// Euclidean distance (sqrt of [`l2_squared`]).
 #[inline]
-pub fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
+pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     l2_squared(a, b).sqrt()
 }
 
 /// Squared norm (dot of a vector with itself).
 #[inline]
-pub fn precompute_sq_norm(v: &[f64]) -> f64 {
+pub fn precompute_sq_norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum()
 }
 
@@ -472,7 +481,7 @@ pub fn precompute_sq_norm(v: &[f64]) -> f64 {
 ///
 /// Returns one `(dot, sq_norm_key)` per key; shape-mismatched keys contribute
 /// `(0.0, 0.0)`.
-pub fn batch_dot_and_sq_norms(query: &[f64], keys: &[&[f64]]) -> Vec<(f64, f64)> {
+pub fn batch_dot_and_sq_norms(query: &[f32], keys: &[&[f32]]) -> Vec<(f32, f32)> {
     keys.iter()
         .map(|k| {
             let (dot, _, sq) = dot_and_sq_norms(query, k);
@@ -485,7 +494,7 @@ pub fn batch_dot_and_sq_norms(query: &[f64], keys: &[&[f64]]) -> Vec<(f64, f64)>
 ///
 /// Computes the query norm once, then reuses the dispatched [`dot_and_sq_norms`]
 /// kernel per key. Zero-norm or shape-mismatched keys score `0.0`.
-pub fn batch_cosine_similarities(query: &[f64], keys: &[&[f64]]) -> Vec<f64> {
+pub fn batch_cosine_similarities(query: &[f32], keys: &[&[f32]]) -> Vec<f32> {
     let norm_q = precompute_sq_norm(query);
     if norm_q == 0.0 {
         return vec![0.0; keys.len()];
@@ -510,7 +519,7 @@ pub fn batch_cosine_similarities(query: &[f64], keys: &[&[f64]]) -> Vec<f64> {
 /// Uses quickselect (`select_nth_unstable_by`) to partition top `k` candidates
 /// in O(N) time when `k < N`, reducing overall complexity from O(N log N) to
 /// O(N + k log k).
-pub fn top_k_by_score(scores: &[f64], k: usize) -> Vec<usize> {
+pub fn top_k_by_score(scores: &[f32], k: usize) -> Vec<usize> {
     if k == 0 || scores.is_empty() {
         return Vec::new();
     }
@@ -528,11 +537,11 @@ pub fn top_k_by_score(scores: &[f64], k: usize) -> Vec<usize> {
 mod tests {
     use super::*;
 
-    fn assert_close(a: f64, b: f64) {
-        assert!((a - b).abs() <= 1e-9, "expected {a} to be within 1e-9 of {b}");
+    fn assert_close(a: f32, b: f32) {
+        assert!((a - b).abs() <= 1e-5, "expected {a} to be within 1e-5 of {b}");
     }
 
-    fn assert_triple_close(a: (f64, f64, f64), b: (f64, f64, f64)) {
+    fn assert_triple_close(a: (f32, f32, f32), b: (f32, f32, f32)) {
         assert_close(a.0, b.0);
         assert_close(a.1, b.1);
         assert_close(a.2, b.2);
@@ -548,8 +557,8 @@ mod tests {
     #[test]
     fn test_kernels_match_scalar() {
         let len = 40;
-        let a: Vec<f64> = (0..len).map(|i| (i as f64) * 0.5 - 3.0).collect();
-        let b: Vec<f64> = (0..len).map(|i| (i as f64) % 7.0 - 2.0).collect();
+        let a: Vec<f32> = (0..len).map(|i| (i as f32) * 0.5 - 3.0).collect();
+        let b: Vec<f32> = (0..len).map(|i| (i as f32) % 7.0 - 2.0).collect();
 
         assert_triple_close(dot_and_sq_norms(&a, &b), dot_and_sq_norms_scalar(&a, &b));
         assert_close(l2_squared(&a, &b), l2_squared_scalar(&a, &b));
@@ -583,13 +592,13 @@ mod tests {
 
     #[test]
     fn test_odd_lengths_match_scalar() {
-        // Every SIMD kernel processes whole 2- or 4-lane chunks and hands the
+        // Every SIMD kernel processes whole 4- or 8-lane chunks and hands the
         // remainder to a scalar tail; odd lengths are where that seam can drift.
         // Runs the dispatched path, so it covers SSE2/AVX on x86_64 and NEON on
         // aarch64 without naming either.
         for len in MIN_DIM_SIMD..=MIN_DIM_SIMD + 33 {
-            let a: Vec<f64> = (0..len).map(|i| (i as f64) * 0.25 - 4.0).collect();
-            let b: Vec<f64> = (0..len).map(|i| (i as f64 * 1.5) % 11.0 - 5.0).collect();
+            let a: Vec<f32> = (0..len).map(|i| (i as f32) * 0.25 - 4.0).collect();
+            let b: Vec<f32> = (0..len).map(|i| (i as f32 * 1.5) % 11.0 - 5.0).collect();
             assert_triple_close(dot_and_sq_norms(&a, &b), dot_and_sq_norms_scalar(&a, &b));
             assert_close(l2_squared(&a, &b), l2_squared_scalar(&a, &b));
             assert_close(l1_distance(&a, &b), l1_distance_scalar(&a, &b));
@@ -600,8 +609,8 @@ mod tests {
     fn test_short_vectors_use_scalar_path() {
         // Below MIN_DIM_SIMD the dispatch must still agree with the scalar path.
         for len in 1..MIN_DIM_SIMD {
-            let a: Vec<f64> = (0..len).map(|i| i as f64).collect();
-            let b: Vec<f64> = (0..len).map(|i| (i * 3) as f64 % 5.0).collect();
+            let a: Vec<f32> = (0..len).map(|i| i as f32).collect();
+            let b: Vec<f32> = (0..len).map(|i| (i * 3) as f32 % 5.0).collect();
             assert_triple_close(dot_and_sq_norms(&a, &b), dot_and_sq_norms_scalar(&a, &b));
             assert_close(l2_squared(&a, &b), l2_squared_scalar(&a, &b));
             assert_close(l1_distance(&a, &b), l1_distance_scalar(&a, &b));
@@ -642,19 +651,19 @@ mod tests {
         let b = [2.0, 3.0, 4.0];
         assert_close(dot_product(&a, &b), 20.0);
         // ||b - a|| = sqrt(1 + 1 + 1) = sqrt(3)
-        assert_close(euclidean_distance(&a, &b), 3.0_f64.sqrt());
+        assert_close(euclidean_distance(&a, &b), 3.0_f32.sqrt());
     }
 
     #[test]
     fn test_batch_matches_per_item() {
         let query = vec![1.0, 0.5, -0.5, 2.0];
-        let keys: Vec<Vec<f64>> = vec![
+        let keys: Vec<Vec<f32>> = vec![
             vec![1.0, 1.0, 1.0, 1.0],
             vec![-1.0, 0.0, 0.0, 1.0],
             vec![2.0, 1.0, -1.0, 4.0],
             vec![0.0, 0.0, 0.0, 0.0], // zero-norm key
         ];
-        let key_refs: Vec<&[f64]> = keys.iter().map(|v| v.as_slice()).collect();
+        let key_refs: Vec<&[f32]> = keys.iter().map(|v| v.as_slice()).collect();
 
         let batch = batch_cosine_similarities(&query, &key_refs);
         for (i, got) in batch.iter().enumerate() {
@@ -683,9 +692,9 @@ mod tests {
         // Mirror of DistanceMetric::Cosine semantics (older scalar impl).
         let a = [1.0, 2.0, 3.0];
         let b = [4.0, 5.0, 6.0];
-        let mut dot: f64 = 0.0;
-        let mut n: f64 = 0.0;
-        let mut m: f64 = 0.0;
+        let mut dot: f32 = 0.0;
+        let mut n: f32 = 0.0;
+        let mut m: f32 = 0.0;
         for (x, y) in a.iter().zip(b.iter()) {
             dot += x * y;
             n += x * x;

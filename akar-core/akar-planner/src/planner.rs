@@ -10,7 +10,7 @@ use crate::join_order::{build_join_tree, build_wcoj_intersect, flatten_join_plan
 use crate::logical_operator::*;
 use akar_binder::bound_statement::*;
 use akar_common::error::PlannerError;
-use akar_common::types::{Value, extract_f64_list};
+use akar_common::types::{Value, extract_f32_list};
 use akar_parser::ast::Expression;
 use std::collections::HashSet;
 
@@ -249,7 +249,7 @@ impl QueryPlanner {
             _ => return Err("Second argument to vector_similarity_scan must be a column name string".into()),
         };
         let query_vector = match eval_standalone_expr(&args[2]) {
-            Some(v) => extract_f64_list(&v).map_err(|_| {
+            Some(v) => extract_f32_list(&v).map_err(|_| {
                 format!("Third argument to vector_similarity_scan must be a list of numbers, got: {v:?}")
             })?,
             None => return Err("Third argument to vector_similarity_scan must be a list of numbers".into()),

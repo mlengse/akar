@@ -1642,11 +1642,11 @@ impl TableCatalog {
 
         // Collect (row_id, vector) pairs while holding the read reference,
         // then re-insert under a single mutable borrow of the index.
-        let mut data: Vec<(usize, Vec<f64>)> = Vec::new();
+        let mut data: Vec<(usize, Vec<f32>)> = Vec::new();
         if let Some(table) = self.get_node_table_by_name(&table_name) {
             for row_id in 0..table.num_rows as usize {
                 if let Some(val) = table.get_value(row_id, col_idx) {
-                    if let Ok(vec) = crate::extract_f64_list_from_value(val) {
+                    if let Ok(vec) = crate::extract_f32_list_from_value(val) {
                         data.push((row_id, vec));
                     }
                 }

@@ -605,10 +605,10 @@ impl QueryProcessor {
                 let mut vec = Vec::with_capacity(items.len());
                 for item in &items {
                     match item {
-                        Value::Double(d) => vec.push(*d),
-                        Value::Int64(i) => vec.push(*i as f64),
-                        Value::Int32(i) => vec.push(*i as f64),
-                        Value::Float(f) => vec.push(*f as f64),
+                        Value::Double(d) => vec.push(*d as f32),
+                        Value::Int64(i) => vec.push(*i as f32),
+                        Value::Int32(i) => vec.push(*i as f32),
+                        Value::Float(f) => vec.push(*f),
                         _ => return Err("query_vector must be a list of numbers".into()),
                     }
                 }

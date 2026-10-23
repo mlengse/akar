@@ -499,6 +499,30 @@ pub fn extract_f64_list(val: &Value) -> Result<Vec<f64>, String> {
     }
 }
 
+/// Numeric list items (Double/Int64/Int32/Float) are coerced to `f32`; any
+/// other item or a non-List value produces an error. Used by the 32-bit vector
+/// index write path (FR-007).
+pub fn extract_f32_list(val: &Value) -> Result<Vec<f32>, String> {
+    match val {
+        Value::List(items) => {
+            let mut result = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::Double(d) => result.push(*d as f32),
+                    Value::Int64(i) => result.push(*i as f32),
+                    Value::Int32(i) => result.push(*i as f32),
+                    Value::Float(f) => result.push(*f),
+                    other => {
+                        return Err(format!("Expected numeric value in vector list, got {:?}", other));
+                    }
+                }
+            }
+            Ok(result)
+        }
+        other => Err(format!("Expected List value for vector, got {:?}", other)),
+    }
+}
+
 /// Render a [`Value`] as the canonical string key used by hash indexes on
 /// primary keys.
 ///

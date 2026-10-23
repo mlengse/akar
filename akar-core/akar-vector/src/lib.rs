@@ -22,7 +22,7 @@ pub use distance::{
     MIN_DIM_AVX, MIN_DIM_SIMD, batch_cosine_similarities, batch_dot_and_sq_norms, precompute_sq_norm, top_k_by_score,
 };
 
-use akar_common::types::extract_f64_list;
+use akar_common::types::extract_f32_list;
 use akar_extension::{Extension, ExtensionContext};
 
 /// The Vector extension adds embedding/vector support to Akar.
@@ -69,10 +69,10 @@ impl Extension for VectorExtension {
                     if args.len() < 2 {
                         return Err("cosine_similarity requires 2 arguments".into());
                     }
-                    let a = extract_f64_list(&args[0])?;
-                    let b = extract_f64_list(&args[1])?;
+                    let a = extract_f32_list(&args[0])?;
+                    let b = extract_f32_list(&args[1])?;
                     let result = crate::cosine_similarity(&a, &b);
-                    Ok(Value::Double(result))
+                    Ok(Value::Double(result as f64))
                 }),
             },
         );
@@ -85,10 +85,10 @@ impl Extension for VectorExtension {
                     if args.len() < 2 {
                         return Err("euclidean_distance requires 2 arguments".into());
                     }
-                    let a = extract_f64_list(&args[0])?;
-                    let b = extract_f64_list(&args[1])?;
+                    let a = extract_f32_list(&args[0])?;
+                    let b = extract_f32_list(&args[1])?;
                     let result = crate::euclidean_distance(&a, &b);
-                    Ok(Value::Double(result))
+                    Ok(Value::Double(result as f64))
                 }),
             },
         );
@@ -101,10 +101,10 @@ impl Extension for VectorExtension {
                     if args.len() < 2 {
                         return Err("dot_product requires 2 arguments".into());
                     }
-                    let a = extract_f64_list(&args[0])?;
-                    let b = extract_f64_list(&args[1])?;
+                    let a = extract_f32_list(&args[0])?;
+                    let b = extract_f32_list(&args[1])?;
                     let result = crate::dot_product(&a, &b);
-                    Ok(Value::Double(result))
+                    Ok(Value::Double(result as f64))
                 }),
             },
         );
@@ -117,10 +117,10 @@ impl Extension for VectorExtension {
                     if args.len() < 2 {
                         return Err("l2_distance requires 2 arguments".into());
                     }
-                    let a = extract_f64_list(&args[0])?;
-                    let b = extract_f64_list(&args[1])?;
+                    let a = extract_f32_list(&args[0])?;
+                    let b = extract_f32_list(&args[1])?;
                     let result = crate::l2_distance(&a, &b);
-                    Ok(Value::Double(result))
+                    Ok(Value::Double(result as f64))
                 }),
             },
         );
@@ -133,34 +133,34 @@ impl Extension for VectorExtension {
 /// Compute cosine similarity between two vectors.
 ///
 /// Dispatched to SIMD-accelerated single-pass kernel in [`distance`].
-pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     distance::cosine_similarity(a, b)
 }
 
 /// Compute Euclidean distance between two vectors.
 ///
 /// Dispatched to SIMD-accelerated kernel in [`distance`].
-pub fn euclidean_distance(a: &[f64], b: &[f64]) -> f64 {
+pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     distance::euclidean_distance(a, b)
 }
 
 /// Compute dot product of two vectors.
 ///
 /// Dispatched to SIMD-accelerated kernel in [`distance`].
-pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
+pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     distance::dot_product(a, b)
 }
 
 /// Compute L2 squared distance (squared Euclidean).
 ///
 /// Dispatched to SIMD-accelerated kernel in [`distance`].
-pub fn l2_distance(a: &[f64], b: &[f64]) -> f64 {
+pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
     distance::l2_squared(a, b)
 }
 
 /// Normalize a vector to unit length.
-pub fn normalize(v: &[f64]) -> Vec<f64> {
-    let norm: f64 = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+pub fn normalize(v: &[f32]) -> Vec<f32> {
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm == 0.0 {
         return v.to_vec();
     }
@@ -255,55 +255,55 @@ mod tests {
     fn test_cosine_similarity_identical() {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![1.0, 2.0, 3.0];
-        assert!((cosine_similarity(&a, &b) - 1.0).abs() < 1e-10);
+        assert!((cosine_similarity(&a, &b) - 1.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_cosine_similarity_orthogonal() {
         let a = vec![1.0, 0.0];
         let b = vec![0.0, 1.0];
-        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-10);
+        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_euclidean_distance() {
         let a = vec![0.0, 0.0];
         let b = vec![3.0, 4.0];
-        assert!((euclidean_distance(&a, &b) - 5.0).abs() < 1e-10);
+        assert!((euclidean_distance(&a, &b) - 5.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_dot_product() {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![4.0, 5.0, 6.0];
-        assert!((dot_product(&a, &b) - 32.0).abs() < 1e-10);
+        assert!((dot_product(&a, &b) - 32.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_l2_distance() {
         let a = vec![0.0, 0.0];
         let b = vec![3.0, 4.0];
-        assert!((l2_distance(&a, &b) - 25.0).abs() < 1e-10);
+        assert!((l2_distance(&a, &b) - 25.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
         let n = normalize(&v);
-        assert!((n[0] - 0.6).abs() < 1e-10);
-        assert!((n[1] - 0.8).abs() < 1e-10);
+        assert!((n[0] - 0.6).abs() < 1e-5);
+        assert!((n[1] - 0.8).abs() < 1e-5);
     }
 
     #[test]
     fn test_cosine_different_lengths() {
         let a = vec![1.0, 2.0];
         let b = vec![1.0, 2.0, 3.0];
-        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-10);
+        assert!((cosine_similarity(&a, &b) - 0.0).abs() < 1e-5);
     }
 
     #[test]
     fn test_empty_vectors() {
-        assert!((euclidean_distance(&[], &[]) - 0.0).abs() < 1e-10);
+        assert!((euclidean_distance(&[], &[]) - 0.0).abs() < 1e-5);
     }
 
     #[test]
@@ -316,7 +316,7 @@ mod tests {
     fn test_dot_product_negative() {
         let a = vec![1.0, -1.0];
         let b = vec![-1.0, 1.0];
-        assert!((dot_product(&a, &b) + 2.0).abs() < 1e-10);
+        assert!((dot_product(&a, &b) + 2.0).abs() < 1e-5);
     }
 
     // ── re-ranker tests ───────────────────────────────────────────────────

@@ -68,7 +68,7 @@ pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use string_dictionary::StringDictionary;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 pub use undo_buffer::UndoBuffer;
-pub use vector_index::{VectorIndexTable, extract_f64_list_from_value};
+pub use vector_index::{VectorIndexTable, extract_f64_list_from_value, extract_f32_list_from_value};
 pub use wal::WalSink;
 pub use wal_replayer::{ReplayResult, WALReplayer};
 

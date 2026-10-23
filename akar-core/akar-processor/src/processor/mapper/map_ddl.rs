@@ -274,7 +274,7 @@ pub fn map_and_execute_ddl(
                 if let Some(col_idx) = col_idx {
                     for row_id in 0..table.num_rows as usize {
                         if let Some(val) = table.get_value(row_id, col_idx) {
-                            if let Ok(vec) = akar_storage::extract_f64_list_from_value(val) {
+                            if let Ok(vec) = akar_storage::extract_f32_list_from_value(val) {
                                 if let Some(mut vib) = tc.get_vector_index_by_name_mut(&vi.index_name) {
                                     vib.hnsw_mut().insert(vec, row_id);
                                 }

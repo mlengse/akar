@@ -15,7 +15,7 @@ use std::sync::Arc;
 pub struct PhysicalVectorSimilarityScan {
     pub index_name: String,
     pub index_id: u64,
-    pub query_vector: Vec<f64>,
+    pub query_vector: Vec<f32>,
     pub top_k: u64,
     /// Beam width — the size of the dynamic candidate pool expanded at layer 0.
     ///
@@ -95,7 +95,7 @@ impl PhysicalOperatorExec for PhysicalVectorSimilarityScan {
 
         for (dist, row_id) in &results {
             // Add distance (second-to-last) and `_id` (last) columns.
-            output_columns[num_cols].push(Value::Double(*dist));
+            output_columns[num_cols].push(Value::Double(*dist as f64));
             output_columns[num_cols + 1].push(Value::Int64(*row_id as i64));
 
             // Look up each column value from the node table

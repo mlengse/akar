@@ -112,7 +112,7 @@ impl OptimizationPass for VectorSimilarityDetection {
 /// `cosine_similarity(<var>.<col>, [q]) > thr` (or `>= thr`). Anything else —
 /// a compound predicate, a non-numeric threshold, a different function name —
 /// returns `None` so the plan is preserved verbatim.
-fn extract_vector_threshold(predicate: &Option<Expression>) -> Option<(Expression, String, Vec<f64>)> {
+fn extract_vector_threshold(predicate: &Option<Expression>) -> Option<(Expression, String, Vec<f32>)> {
     let expr = predicate.as_ref()?;
     let (column, query) = match expr {
         Expression::BinaryOp(BinaryOp::GreaterThan | BinaryOp::GreaterThanOrEqual, left, _right) => {
@@ -134,7 +134,7 @@ fn extract_vector_threshold(predicate: &Option<Expression>) -> Option<(Expressio
 }
 
 /// Match `cosine_similarity(<var>.<col>, [q])` and return `(col, q)`.
-fn extract_cos_and_query(expr: &Expression) -> Option<(String, Vec<f64>)> {
+fn extract_cos_and_query(expr: &Expression) -> Option<(String, Vec<f32>)> {
     match expr {
         Expression::FunctionCall(name, args) if name.eq_ignore_ascii_case("cosine_similarity") && args.len() == 2 => {
             let column = match &args[0] {
@@ -149,14 +149,14 @@ fn extract_cos_and_query(expr: &Expression) -> Option<(String, Vec<f64>)> {
 }
 
 /// Extract a query vector from an AST list literal `[1.0, 2.0, ...]`.
-fn query_vector_from_expr(expr: &Expression) -> Option<Vec<f64>> {
+fn query_vector_from_expr(expr: &Expression) -> Option<Vec<f32>> {
     match expr {
         Expression::List(items) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
                 match item {
-                    Expression::Constant(Constant::Float(f)) => out.push(*f),
-                    Expression::Constant(Constant::Integer(i)) => out.push(*i as f64),
+                    Expression::Constant(Constant::Float(f)) => out.push(*f as f32),
+                    Expression::Constant(Constant::Integer(i)) => out.push(*i as f32),
                     _ => return None,
                 }
             }
@@ -167,7 +167,7 @@ fn query_vector_from_expr(expr: &Expression) -> Option<Vec<f64>> {
 }
 
 /// The ORDER BY must be a single DESC sort key on the same `cos(col, [q])`.
-fn order_by_matches_cos(order: &LogicalOrderBy, column: &str, query: &[f64]) -> bool {
+fn order_by_matches_cos(order: &LogicalOrderBy, column: &str, query: &[f32]) -> bool {
     if order.sort_keys.len() != 1 {
         return false;
     }
@@ -190,16 +190,16 @@ mod tests {
         Expression::PropertyAccess(Box::new(Expression::Variable("n".into())), name.into())
     }
 
-    fn cosine(col: &str, q: &[f64]) -> Expression {
-        let list = Expression::List(q.iter().map(|v| Expression::Constant(Constant::Float(*v))).collect());
+    fn cosine(col: &str, q: &[f32]) -> Expression {
+        let list = Expression::List(q.iter().map(|v| Expression::Constant(Constant::Float(*v as f64))).collect());
         Expression::FunctionCall("cosine_similarity".into(), vec![prop(col), list])
     }
 
-    fn gt_threshold(col: &str, q: &[f64], thr: f64) -> Expression {
+    fn gt_threshold(col: &str, q: &[f32], thr: f32) -> Expression {
         Expression::BinaryOp(
             BinaryOp::GreaterThan,
             Box::new(cosine(col, q)),
-            Box::new(Expression::Constant(Constant::Float(thr))),
+            Box::new(Expression::Constant(Constant::Float(thr as f64))),
         )
     }
 
@@ -215,7 +215,7 @@ mod tests {
         })
     }
 
-    fn order_by_cos(col: &str, q: &[f64]) -> LogicalOperator {
+    fn order_by_cos(col: &str, q: &[f32]) -> LogicalOperator {
         LogicalOperator::OrderBy(LogicalOrderBy {
             sort_keys: vec![(cosine(col, q), false)],
             children: Vec::new(),
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_rewrites_canonical_pattern_preserving_rest() {
-        let q = vec![0.9, 0.1];
+        let q: Vec<f32> = vec![0.9, 0.1];
         let plan = vec![
             scan_with_predicate(Some(gt_threshold("embedding", &q, 0.8))),
             order_by_cos("embedding", &q),

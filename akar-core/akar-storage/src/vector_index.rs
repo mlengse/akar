@@ -189,7 +189,7 @@ impl VectorIndexTable {
 
             while offset < num_vectors as usize {
                 let (id, vec_data) = nodes[offset];
-                let vec_len = vec_data.len().saturating_mul(8);
+                let vec_len = vec_data.len().saturating_mul(4);
                 let entry_len = 8 + 4 + vec_len;
                 if pos + entry_len > capacity {
                     // Doesn't fit on this page. If the page is still empty the
@@ -294,10 +294,10 @@ impl VectorIndexTable {
                     break;
                 }
 
-                let dims = vec_len / 8;
+                let dims = vec_len / 4;
                 let mut vec_data = Vec::with_capacity(dims);
                 for i in 0..dims {
-                    let f = f64::from_le_bytes(page_data[pos + i * 8..pos + (i + 1) * 8].try_into().unwrap());
+                    let f = f32::from_le_bytes(page_data[pos + i * 4..pos + (i + 1) * 4].try_into().unwrap());
                     vec_data.push(f);
                 }
                 pos += vec_len;
@@ -349,6 +349,14 @@ impl VectorIndexTable {
 /// Helper: extract a `Vec<f64>` from a `Value` (expects `Value::List` of numbers).
 pub fn extract_f64_list_from_value(val: &Value) -> Result<Vec<f64>, StorageError> {
     akar_common::types::extract_f64_list(val).map_err(|e| StorageError::TypeMismatch {
+        expected: "numeric vector".into(),
+        actual: e,
+    })
+}
+
+/// Helper: extract a `Vec<f32>` from a `Value` (expects `Value::List` of numbers).
+pub fn extract_f32_list_from_value(val: &Value) -> Result<Vec<f32>, StorageError> {
+    akar_common::types::extract_f32_list(val).map_err(|e| StorageError::TypeMismatch {
         expected: "numeric vector".into(),
         actual: e,
     })
@@ -466,7 +474,7 @@ mod tests {
         idx.register_file(&mut bm, dir.path());
         // A vector that cannot fit in one page must fail loudly, not silently
         // drop data (P52.17).
-        let huge = vec![1.0f64; DEFAULT_PAGE_SIZE];
+        let huge = vec![1.0f32; DEFAULT_PAGE_SIZE];
         idx.hnsw_mut().insert(huge, 0);
         assert!(idx.save(&mut bm).is_err());
     }

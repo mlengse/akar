@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+- **feat(storage) - Feature 020 / T006–T020: secondary index + dedup write path (2026-10-23)** · gate `test [akar-core]` **368 passed / 0 failed** (akar-storage) + **187 passed / 0 failed** (akar-processor) · `cargo check --workspace` clean · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean
+  - `bind_create_index` (`akar-core/akar-binder/src/binder/mod.rs`) now rejects PK columns and allows secondary indexes on non-PK properties (FR-001); `conflict_action` / `IF NOT EXISTS` wired AST → binder → catalog (FR-003); catalog PK check inverted in `create_index` (`akar-core/akar-catalog/src/lib.rs`).
+  - New `SecondaryIndex` struct with `Building → Available → Dropped` state machine on `OnDiskHashIndex<String>` (`akar-core/akar-storage/src/index.rs`), wired through `TableCatalog` + `StorageManager` with BufferManager registration, introspection (`list_secondary_indexes`, `get_secondary_index`), and dedup lookup (`lookup_secondary_index`, FR-004/005).
+  - `StorageManager::insert_row_with_dedup` + `PhysicalInsertNode` wires dedup on `content_identity_fingerprint` — duplicates return existing row with no WAL/undo write (FR-006).
+  - **Benchmark pending:** per-row dedup p95 at 1k vs 10k memories has **not** been measured (Constitution §III). SC-001 (<2× growth) and FR-026 before/after recording await execution per `quickstart.md` Scenario 1. The dedup lookup returns `None` (scan fallback) when no index is available, so behavior is unchanged for graphs without a declared index.
+
 ## [0.3.0] - 2026-10-23
 
 ### Removed

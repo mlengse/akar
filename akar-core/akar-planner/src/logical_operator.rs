@@ -416,7 +416,7 @@ pub struct LogicalArtIndexRangeScan {
 pub struct LogicalVectorSimilarityScan {
     pub table_name: String,
     pub column_name: String,
-    pub query_vector: Vec<f64>,
+    pub query_vector: Vec<f32>,
     pub top_k: u64,
     /// Beam width — the size of the dynamic candidate pool expanded before the
     /// result is truncated to `top_k`.
