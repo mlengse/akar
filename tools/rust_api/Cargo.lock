@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "arrow",
  "flate2",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-common",
  "arrow",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "pest",
  "pest_derive",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "akar-common",
  "tracing",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ahash",
  "akar-common",
@@ -590,9 +590,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cc"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877bf67ac8e52449eb2f9e98a344ea163beb70dd1f9eebe3cc5357dcfeaee4df"
+checksum = "86e055fa6e3e40ad6187ba25b6855eeb635d5271f8e0f0e1e9a5826b8d75bea0"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -1771,9 +1771,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smallvec"
-version = "1.16.3"
+version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
+checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 
 [[package]]
 name = "snap"
