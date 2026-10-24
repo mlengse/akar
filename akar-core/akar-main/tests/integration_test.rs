@@ -1223,10 +1223,7 @@ fn test_ddl_pipeline_create_drop_index() {
 
     // CREATE ART INDEX on PK should fail (FR-001: secondary indexes must be on non-PK columns).
     let err = exec_err(&conn, "CREATE ART INDEX user_idx FOR (u:User) ON (u.id)");
-    assert!(
-        err.contains("primary key"),
-        "Expected 'primary key' error, got: {err}"
-    );
+    assert!(err.contains("primary key"), "Expected 'primary key' error, got: {err}");
 
     // Insert data and verify table works with PK index
     exec(&conn, "CREATE (u:User {id: 1, name: 'Alice'})");
@@ -1641,12 +1638,12 @@ fn test_typed_multi_edge_same_pair() {
     exec(&conn, "CREATE (b:Memory {id: 2, content: 'b'})");
 
     // Two different types between the same pair (1 -> 2)
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          CREATE (a)-[:Connected {type: 'similar', weight: 0.9}]->(b)",
     );
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          CREATE (a)-[:Connected {type: 'contradicts', weight: 0.3}]->(b)",
@@ -1687,13 +1684,13 @@ fn test_typed_idempotent_rewrite() {
     exec(&conn, "CREATE (b:Memory {id: 2, content: 'b'})");
 
     // Write the same relationship twice
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          MERGE (a)-[r:Connected {type: 'knows'}]->(b) \
          SET r.weight = 0.9",
     );
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          MERGE (a)-[r:Connected {type: 'knows'}]->(b) \
@@ -1726,10 +1723,10 @@ fn test_merge_update_existing_pk() {
     );
 
     // First create via MERGE
-    exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v1'");
+    let _ = exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v1'");
 
     // Merge again with different value — should update, not duplicate
-    exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v2'");
+    let _ = exec_ok(&conn, "MERGE (m:Meta {key: 'k'}) SET m.value = 'v2'");
 
     let rows = query_rows(&conn, "MATCH (m:Meta {key: 'k'}) RETURN m.value");
     assert_eq!(rows.len(), 1, "MERGE should update, not duplicate");
@@ -1744,27 +1741,24 @@ fn test_typed_edge_filter_traversal() {
         &conn,
         "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
     );
-    exec(
-        &conn,
-        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING)",
-    );
+    exec(&conn, "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING)");
     exec(&conn, "CREATE (a:Memory {id: 1, content: 'a'})");
     exec(&conn, "CREATE (b:Memory {id: 2, content: 'b'})");
     exec(&conn, "CREATE (c:Memory {id: 3, content: 'c'})");
 
     // Two different types between 1 -> 2
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          CREATE (a)-[:Connected {type: 'knows'}]->(b)",
     );
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          CREATE (a)-[:Connected {type: 'contradicts'}]->(b)",
     );
     // One edge from 1 -> 3
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (c:Memory {id: 3}) \
          CREATE (a)-[:Connected {type: 'knows'}]->(c)",
@@ -1809,7 +1803,7 @@ fn test_typed_round_trip() {
     exec(&conn, "CREATE (a:Memory {id: 1})");
     exec(&conn, "CREATE (b:Memory {id: 2})");
 
-    exec_ok(
+    let _ = exec_ok(
         &conn,
         "MATCH (a:Memory {id: 1}), (b:Memory {id: 2}) \
          CREATE (a)-[:Connected {type: 'knows', created_at: 1000000, valid_from: 2000000, valid_to: 3000000}]->(b)",
@@ -1835,10 +1829,7 @@ fn test_rel_empty_type_rejected_via_cypher() {
         &conn,
         "CREATE NODE TABLE Memory(id INT64, content STRING, PRIMARY KEY (id))",
     );
-    exec(
-        &conn,
-        "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING)",
-    );
+    exec(&conn, "CREATE REL TABLE Connected(FROM Memory TO Memory, type STRING)");
     exec(&conn, "CREATE (a:Memory {id: 1})");
     exec(&conn, "CREATE (b:Memory {id: 2})");
 

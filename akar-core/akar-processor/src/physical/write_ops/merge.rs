@@ -167,9 +167,15 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
                     if let Some(mut tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
                         let logged_row = self.wal_sink.is_some().then(|| new_values.clone());
+                        let secondary_keys = self.table_catalog.secondary_index_keys_for_columns(
+                            &self.table_name,
+                            &tbl.columns,
+                            &new_values,
+                        );
                         let row_id = tbl
                             .insert_row_with_txn(new_values, self.txn_id)
                             .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
+                        self.table_catalog.apply_secondary_index_keys(secondary_keys, row_id);
                         log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
                         if let Some(sink) = self.undo_sink.as_ref()
                             && let Ok(mut u) = sink.lock()

@@ -240,8 +240,14 @@ impl PhysicalOperatorExec for PhysicalInsert {
         } else if let Some(mut node_tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
             // Node Table Insert
             for row_values in &self.values {
+                let secondary_keys = self.table_catalog.secondary_index_keys_for_columns(
+                    &self.table_name,
+                    &node_tbl.columns,
+                    row_values,
+                );
                 if let Ok(row_id) = node_tbl.insert_row_with_txn(row_values.clone(), self.txn_id) {
                     inserted += 1;
+                    self.table_catalog.apply_secondary_index_keys(secondary_keys, row_id);
                     akar_storage::wal::log_insert_record(&self.wal_sink, self.table_id, row_values);
                     if let Some(sink) = self.undo_sink.as_ref()
                         && let Ok(mut u) = sink.lock()

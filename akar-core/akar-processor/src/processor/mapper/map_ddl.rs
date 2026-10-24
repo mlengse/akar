@@ -218,27 +218,40 @@ pub fn map_and_execute_ddl(
             }
         }
         LogicalOperator::CreateIndex(idx) => {
-            let tc = ctx
-                .table_catalog
+            let storage = ctx
+                .storage_manager
                 .as_ref()
-                .ok_or("CREATE INDEX requires a table catalog")?;
-            tc.create_art_index(&idx.table_name, &idx.index_name)?;
+                .ok_or("CREATE INDEX requires a storage manager")?;
+            storage
+                .create_secondary_index(
+                    idx.index_name.clone(),
+                    idx.table_name.clone(),
+                    idx.column_name.clone(),
+                    idx.index_type,
+                    idx.if_not_exists,
+                )
+                .map_err(|e| format!("Failed to create index '{}': {e}", idx.index_name))?;
             tracing::info!(
-                "Pipeline: Created ART index '{}' on '{}'",
+                "Pipeline: Created {} index '{}' on '{}'",
+                idx.index_type.as_str(),
                 idx.index_name,
                 idx.table_name
             );
             Ok(ddl_success_chunk(&format!(
-                "ART index '{}' created on table '{}'",
-                idx.index_name, idx.table_name
+                "{} index '{}' created on table '{}'",
+                idx.index_type.as_str(),
+                idx.index_name,
+                idx.table_name
             )))
         }
         LogicalOperator::DropIndex(idx) => {
-            let tc = ctx
-                .table_catalog
+            let storage = ctx
+                .storage_manager
                 .as_ref()
-                .ok_or("DROP INDEX requires a table catalog")?;
-            tc.drop_art_index(&idx.table_name)?;
+                .ok_or("DROP INDEX requires a storage manager")?;
+            storage
+                .drop_secondary_index(&idx.index_name, &idx.table_name)
+                .map_err(|e| format!("Failed to drop index '{}': {e}", idx.index_name))?;
             tracing::info!("Pipeline: Dropped index '{}' from '{}'", idx.index_name, idx.table_name);
             Ok(ddl_success_chunk(&format!(
                 "Index '{}' dropped from table '{}'",

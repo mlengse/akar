@@ -300,26 +300,46 @@ fn create_nodes_statement<T: TypedNode>() -> String {
     format!("UNWIND $rows AS r CREATE (n:{table} {{{properties}}}) RETURN count(n) AS written")
 }
 
-/// `UNWIND $rows AS r MATCH ... MERGE (a)-[e:REL]->(b) SET ... RETURN count(e)`
-/// for an entire chunk of edges.
+/// `UNWIND $rows AS r MATCH ... MERGE (a)-[e:REL {type: r.type}]->(b) SET ...
+/// RETURN count(e)` for an entire chunk of edges.
+///
+/// The `type` property is part of the MERGE pattern, not of the SET list: a
+/// relationship is identified by `(source, target, type)`, so writing
+/// "similar" and "contradicts" for the same pair stores two edges (FR-013),
+/// while re-writing one type updates that edge instead of duplicating it
+/// (FR-014).
 fn merge_edges_batch_statement(rel: &RelSpec, properties: &[&str]) -> String {
     let key = rel.primary_key;
-    let set_clause = if properties.is_empty() {
+    // `type` identities the edge; every other property is updated in place.
+    let pattern = if properties.contains(&"type") {
+        format!("[e:{} {{type: r.type}}]", rel.table)
+    } else {
+        format!("[e:{}]", rel.table)
+    };
+    let assignments = properties
+        .iter()
+        .filter(|property| **property != "type")
+        .map(|property| {
+            if *property == "created_at" {
+                // Creation time is written once and preserved by later rewrites
+                // of the same `(source, target, type)` identity.
+                "e.created_at = coalesce(e.created_at, r.created_at)".to_string()
+            } else {
+                format!("e.{property} = r.{property}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let set_clause = if assignments.is_empty() {
         String::new()
     } else {
-        let assignments = properties
-            .iter()
-            .map(|property| format!("e.{property} = r.{property}"))
-            .collect::<Vec<_>>()
-            .join(", ");
         format!(" SET {assignments}")
     };
     format!(
         "UNWIND $rows AS r MATCH (a:{from} {{{key}: r.source}}), (b:{to} {{{key}: r.target}}) \
-         MERGE (a)-[e:{table}]->(b){set_clause} RETURN count(e) AS written",
+         MERGE (a)-{pattern}->(b){set_clause} RETURN count(e) AS written",
         from = rel.from_table,
         to = rel.to_table,
-        table = rel.table,
     )
 }
 

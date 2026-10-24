@@ -6,7 +6,7 @@
 
 use crate::physical::common::store_value_in_vector;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use akar_common::types::{Value, PhysicalTypeID, pk_value_to_string};
+use akar_common::types::{PhysicalTypeID, Value, pk_value_to_string};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
 use std::sync::Arc;
@@ -56,26 +56,25 @@ impl PhysicalOperatorExec for PhysicalIndexScan {
         let node_table = self
             .table_catalog
             .get_node_table_by_name(&self.table_name)
-            .ok_or_else(|| {
-                format!(
-                    "Node table '{}' not found for IndexScan",
-                    self.table_name
-                )
-            })?;
+            .ok_or_else(|| format!("Node table '{}' not found for IndexScan", self.table_name))?;
 
         let num_cols = node_table.columns.len();
 
-        // Collect all matching row IDs.
+        // Collect all matching row IDs. The index is on a non-unique column, so
+        // one key can match several rows (FR-002).
         let mut row_ids: Vec<u64> = Vec::new();
         let bm = self.storage_manager.buffer_manager();
-        let mut bm_guard = bm.lock().unwrap();
+        let mut bm_guard = bm.lock().map_err(|e| format!("buffer manager lock poisoned: {e}"))?;
 
         for value in &self.values {
             let key = pk_value_to_string(value);
-            if let Some(offset) = index.lookup(&key, &mut bm_guard).map_err(|e| format!("index lookup error: {e}"))? {
-                row_ids.push(offset);
-            }
+            let offsets = index
+                .lookup_all(&key, &mut bm_guard)
+                .map_err(|e| format!("index lookup error: {e}"))?;
+            row_ids.extend(offsets);
         }
+        row_ids.sort_unstable();
+        row_ids.dedup();
 
         drop(bm_guard);
 

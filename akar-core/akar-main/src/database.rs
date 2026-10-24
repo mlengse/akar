@@ -475,6 +475,38 @@ impl Database {
         Ok(())
     }
 
+    /// Create a secondary index on a non-PK column: data index over the
+    /// existing rows.
+    ///
+    /// The schema entry is created by the binder during `bind()`; this method
+    /// registers the storage-level index, backfills it from the table and
+    /// marks it available (FR-001, FR-003).
+    pub fn create_secondary_index(
+        &self,
+        table_name: &str,
+        index_name: &str,
+        column_name: &str,
+        index_type: akar_catalog::IndexType,
+        if_not_exists: bool,
+    ) -> Result<(), String> {
+        self.storage_manager
+            .create_secondary_index(
+                index_name.to_string(),
+                table_name.to_string(),
+                column_name.to_string(),
+                index_type,
+                if_not_exists,
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    /// Drop a secondary index, releasing its storage.
+    pub fn drop_secondary_index(&self, table_name: &str, index_name: &str) -> Result<(), String> {
+        self.storage_manager
+            .drop_secondary_index(index_name, table_name)
+            .map_err(|e| e.to_string())
+    }
+
     /// Drop an ART index from a node table: data index + schema entry.
     pub fn drop_art_index(&self, table_name: &str, _index_name: &str) -> Result<(), String> {
         self.storage_manager.drop_art_index(table_name, _index_name)?;
@@ -554,6 +586,25 @@ impl Database {
                     };
                     self.storage_manager
                         .restore_node_table(t.table_id, t.name.clone(), columns, index_name);
+                    // Re-create declared secondary indexes over the rows just
+                    // restored, so they survive a restart without a fresh
+                    // declaration (FR-005).
+                    for secondary in &t.secondary_indexes {
+                        if let Err(error) = self.storage_manager.create_secondary_index(
+                            secondary.name.clone(),
+                            t.name.clone(),
+                            secondary.column.clone(),
+                            secondary.index_type,
+                            true,
+                        ) {
+                            tracing::warn!(
+                                index = %secondary.name,
+                                table = %t.name,
+                                %error,
+                                "secondary index could not be restored"
+                            );
+                        }
+                    }
                 }
                 akar_catalog::CatalogEntry::RelTable(t) => {
                     let columns: Vec<_> = t.columns.iter().map(ColumnDefinition::from).collect();
@@ -583,6 +634,38 @@ impl Database {
                     );
                 }
                 _ => {}
+            }
+        }
+    }
+
+    /// Rebuild every declared secondary index from the recovered table state.
+    ///
+    /// WAL replay runs after [`Self::restore_storage_from_catalog`], so an index
+    /// backfilled there can miss replayed rows. Re-running the backfill after
+    /// recovery makes the indexes authoritative for the database's real contents
+    /// (FR-005) — it is idempotent.
+    fn rebuild_secondary_indexes(&self) {
+        let declared: Vec<String> = {
+            let Ok(catalog) = self.catalog.lock() else {
+                return;
+            };
+            catalog
+                .all_entries()
+                .filter_map(|entry| match entry {
+                    akar_catalog::CatalogEntry::NodeTable(t) => Some(
+                        t.secondary_indexes
+                            .iter()
+                            .map(|index| index.name.clone())
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        };
+        for name in declared {
+            if let Err(error) = self.storage_manager.backfill_secondary_index(&name) {
+                tracing::warn!(index = %name, %error, "secondary index could not be rebuilt");
             }
         }
     }
@@ -737,6 +820,10 @@ impl Database {
                      Refusing to start with an empty database — check the WAL."
             ));
         }
+
+        // Rebuild secondary indexes from the fully recovered table state, for
+        // the same reason the HNSW graphs below are rebuilt (FR-005).
+        db.rebuild_secondary_indexes();
 
         // Rebuild HNSW graphs for restored vector indexes so they reflect the
         // fully recovered table state (WAL replay may have inserted rows after

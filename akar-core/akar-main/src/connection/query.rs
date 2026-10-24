@@ -173,7 +173,9 @@ impl Connection {
 
     /// Run planner + optimizer to produce the optimized logical plan.
     fn build_optimized_plan(&self, bound: &BoundStatement) -> Result<Vec<LogicalOperator>, String> {
-        let planner = QueryPlanner::new();
+        // The catalog is handed to the planner so declared secondary indexes are
+        // visible to the index-selection pass (FR-002).
+        let planner = QueryPlanner::with_catalog(self.database.catalog.clone());
         let logical_plan = planner.plan(bound.clone()).map_err(|e| format!("Plan error: {e}"))?;
         let optimizer = Optimizer::with_stats_and_fts(
             self.database.stats_store.clone(),
@@ -397,7 +399,7 @@ impl Connection {
         }
 
         // Plan
-        let planner = QueryPlanner::new();
+        let planner = QueryPlanner::with_catalog(self.database.catalog.clone());
         let logical_plan = match planner.plan(substituted) {
             Ok(p) => p,
             Err(e) => {
@@ -701,7 +703,7 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let stmt = akar_parser::parse(query_str).map_err(|e| format!("Parse error: {e}"))?;
             let binder = Binder::new(db_qf.catalog.clone());
             let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
-            let planner = QueryPlanner::new();
+            let planner = QueryPlanner::with_catalog(db_qf.catalog.clone());
             let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
             let optimizer = Optimizer::with_stats_and_fts(
                 db_qf.stats_store.clone(),
@@ -749,7 +751,7 @@ fn build_processor_handlers(db: &Arc<Database>) -> ProcessorHandlers {
             let stmt = akar_parser::ast::Statement::Query(query.clone());
             let binder = Binder::new(db_sq.catalog.clone());
             let bound = binder.bind(stmt).map_err(|e| format!("Bind error: {e}"))?;
-            let planner = QueryPlanner::new();
+            let planner = QueryPlanner::with_catalog(db_sq.catalog.clone());
             let logical_plan = planner.plan(bound).map_err(|e| format!("Plan error: {e}"))?;
             let optimizer = Optimizer::with_stats_and_fts(
                 db_sq.stats_store.clone(),

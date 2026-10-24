@@ -58,6 +58,18 @@ impl IndexType {
     }
 }
 
+/// A secondary index declared on a non-primary-key column of a node table.
+///
+/// Node tables hold at most one primary-key index (`index_type`/`index_name`)
+/// and any number of secondary indexes, so a secondary declaration never
+/// overwrites the primary-key metadata (FR-001, FR-005).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SecondaryIndexEntry {
+    pub name: String,
+    pub column: String,
+    pub index_type: IndexType,
+}
+
 /// A node table entry in the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeTableEntry {
@@ -69,8 +81,12 @@ pub struct NodeTableEntry {
     pub index_type: Option<IndexType>,
     /// Name of the index (if any).
     pub index_name: Option<String>,
-    /// Column the secondary index is built on (if any).
+    /// Column the primary-key index is built on (if any).
     pub index_column: Option<String>,
+    /// Declared secondary indexes. `#[serde(default)]` keeps catalog files
+    /// written before secondary indexes existed readable.
+    #[serde(default)]
+    pub secondary_indexes: Vec<SecondaryIndexEntry>,
 }
 
 impl NodeTableEntry {
@@ -89,7 +105,12 @@ impl NodeTableEntry {
 
     /// Returns `true` if this table has any index configured.
     pub fn has_index(&self) -> bool {
-        self.index_type.is_some()
+        self.index_type.is_some() || !self.secondary_indexes.is_empty()
+    }
+
+    /// The declared secondary index on `column`, if any.
+    pub fn secondary_index_on(&self, column: &str) -> Option<&SecondaryIndexEntry> {
+        self.secondary_indexes.iter().find(|index| index.column == column)
     }
 }
 
@@ -560,6 +581,7 @@ impl Catalog {
             index_type: None,
             index_name: None,
             index_column: None,
+            secondary_indexes: Vec::new(),
         };
         self.entries.insert(table_id, CatalogEntry::NodeTable(entry));
         self.name_to_id.insert(name, table_id);
@@ -712,7 +734,11 @@ impl Catalog {
         }
     }
 
-    /// Create an index on a node table.
+    /// Declare a secondary index on a node table.
+    ///
+    /// The declared index is recorded alongside — never instead of — the
+    /// table's primary-key index metadata (FR-001). Repeating the declaration
+    /// is a no-op when `if_not_exists` is set (FR-003).
     pub fn create_index(
         &mut self,
         table_name: &str,
@@ -739,14 +765,30 @@ impl Catalog {
                         "Cannot create index on primary key column '{column_name}'. Secondary indexes must be on non-PK properties."
                     )));
                 }
-            // IF NOT EXISTS: if an index already exists on this table, succeed silently.
-            if t.index_name.is_some() && if_not_exists {
-                return Ok(());
-            }
-            t.index_type = Some(index_type);
-            t.index_name = Some(index_name);
-            t.index_column = Some(column_name.to_string());
-            Ok(())
+                if let Some(existing) = t.secondary_indexes.iter().find(|i| i.name == index_name) {
+                    if if_not_exists {
+                        return Ok(());
+                    }
+                    return Err(CatalogError::InvalidOperation(format!(
+                        "Index '{index_name}' already exists on table '{table_name}' (column '{}')",
+                        existing.column
+                    )));
+                }
+                if let Some(existing) = t.secondary_index_on(column_name) {
+                    if if_not_exists {
+                        return Ok(());
+                    }
+                    return Err(CatalogError::InvalidOperation(format!(
+                        "Column '{column_name}' of table '{table_name}' is already indexed by '{}'",
+                        existing.name
+                    )));
+                }
+                t.secondary_indexes.push(SecondaryIndexEntry {
+                    name: index_name,
+                    column: column_name.to_string(),
+                    index_type,
+                });
+                Ok(())
             }
             _ => Err(CatalogError::InvalidOperation(format!(
                 "Table '{table_name}' is not a node table"
@@ -1032,21 +1074,30 @@ impl Catalog {
     }
 
     /// Drop an index from a table.
+    ///
+    /// Drops a declared secondary index by name, leaving the primary-key index
+    /// untouched. A name that matches the primary-key index clears that
+    /// metadata instead.
     pub fn drop_index(&mut self, table_name: &str, index_name: &str) -> Result<(), CatalogError> {
         let entry = self
             .get_entry_by_name_mut(table_name)
             .ok_or_else(|| CatalogError::NotFound(format!("Table '{table_name}' not found")))?;
         match entry {
             CatalogEntry::NodeTable(t) => {
-                if t.index_name.as_deref() != Some(index_name) {
-                    return Err(CatalogError::NotFound(format!(
-                        "Index '{index_name}' not found on table '{table_name}'"
-                    )));
+                let before = t.secondary_indexes.len();
+                t.secondary_indexes.retain(|index| index.name != index_name);
+                if t.secondary_indexes.len() != before {
+                    return Ok(());
                 }
-            t.index_type = None;
-            t.index_name = None;
-            t.index_column = None;
-            Ok(())
+                if t.index_name.as_deref() == Some(index_name) {
+                    t.index_type = None;
+                    t.index_name = None;
+                    t.index_column = None;
+                    return Ok(());
+                }
+                Err(CatalogError::NotFound(format!(
+                    "Index '{index_name}' not found on table '{table_name}'"
+                )))
             }
             _ => Err(CatalogError::InvalidOperation(format!(
                 "Table '{table_name}' is not a node table"
@@ -1066,10 +1117,26 @@ impl Catalog {
         }
     }
 
-    /// Get the column a secondary index is built on for a table, if any.
+    /// Get the column of the first secondary index declared on a table, if any.
     pub fn get_secondary_index_column(&self, table_name: &str) -> Option<String> {
         match self.get_entry_by_name(table_name)? {
-            CatalogEntry::NodeTable(t) => t.index_column.clone(),
+            CatalogEntry::NodeTable(t) => t.secondary_indexes.first().map(|index| index.column.clone()),
+            _ => None,
+        }
+    }
+
+    /// Every secondary index declared on a table, in declaration order.
+    pub fn secondary_indexes(&self, table_name: &str) -> Vec<SecondaryIndexEntry> {
+        match self.get_entry_by_name(table_name) {
+            Some(CatalogEntry::NodeTable(t)) => t.secondary_indexes.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The secondary index declared on `column` for `table_name`, if any.
+    pub fn secondary_index_for_column(&self, table_name: &str, column: &str) -> Option<SecondaryIndexEntry> {
+        match self.get_entry_by_name(table_name) {
+            Some(CatalogEntry::NodeTable(t)) => t.secondary_index_on(column).cloned(),
             _ => None,
         }
     }
@@ -1236,6 +1303,16 @@ impl Catalog {
                                 .get(nt.primary_key_column)
                                 .map(|c| c.name.clone())
                                 .unwrap_or_default(),
+                        ));
+                    }
+                    // Declared secondary indexes are listed so an operator can
+                    // confirm they exist without re-declaring them (FR-005).
+                    for secondary in &nt.secondary_indexes {
+                        result.push((
+                            secondary.name.clone(),
+                            nt.name.clone(),
+                            secondary.index_type.as_str().to_string(),
+                            secondary.column.clone(),
                         ));
                     }
                 }

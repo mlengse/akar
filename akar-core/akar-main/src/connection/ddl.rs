@@ -419,7 +419,7 @@ impl Connection {
             )),
             BoundStatement::BoundUnion(u) => {
                 tracing::info!("UNION ALL query");
-                let planner = akar_planner::QueryPlanner::new();
+                let planner = akar_planner::QueryPlanner::with_catalog(self.database.catalog.clone());
                 let optimizer = akar_optimizer::Optimizer::with_stats_and_fts(
                     self.database.stats_store.clone(),
                     super::fts_estimate::build(self.database.table_catalog()),
@@ -609,7 +609,11 @@ impl Connection {
                     }
 
                     let logged_row = wal_sink.is_some().then(|| values.clone());
+                    let catalog = self.database.table_catalog();
+                    let secondary_keys =
+                        catalog.secondary_index_keys_for_columns(&node.table_name, &table.columns, &values);
                     let row_id = table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                    catalog.apply_secondary_index_keys(secondary_keys, row_id);
                     akar_storage::wal::log_insert_record(
                         &wal_sink,
                         node.table_id,
@@ -845,7 +849,11 @@ impl Connection {
                             }
                         }
                         let logged_row = wal_sink.is_some().then(|| values.clone());
+                        let catalog = self.database.table_catalog();
+                        let secondary_keys =
+                            catalog.secondary_index_keys_for_columns(&m.table_name, &table.columns, &values);
                         let row_id = table.insert_row_with_txn(values, txn_opt.as_ref().map(|t| t.transaction_id))?;
+                        catalog.apply_secondary_index_keys(secondary_keys, row_id);
                         akar_storage::wal::log_insert_record(
                             &wal_sink,
                             m.table_id,
@@ -942,7 +950,16 @@ impl Connection {
                 }
             }
             BoundStatement::BoundCreateIndex(idx) => {
-                self.database.create_art_index(&idx.table_name, &idx.index_name)?;
+                // `CREATE INDEX` on a node table declares a secondary index on a
+                // non-PK column (the binder rejects PK columns); the primary-key
+                // index is created with the table.
+                self.database.create_secondary_index(
+                    &idx.table_name,
+                    &idx.index_name,
+                    &idx.column_name,
+                    idx.index_type,
+                    idx.if_not_exists,
+                )?;
                 tracing::info!(
                     "Created '{}' index '{}' on '{}'",
                     idx.index_type.as_str(),
@@ -957,7 +974,7 @@ impl Connection {
                 ))))
             }
             BoundStatement::BoundDropIndex(idx) => {
-                self.database.drop_art_index(&idx.table_name, &idx.index_name)?;
+                self.database.drop_secondary_index(&idx.table_name, &idx.index_name)?;
                 tracing::info!("Dropped index '{}' from '{}'", idx.index_name, idx.table_name);
                 Ok(Some(QueryResult::success_message(format!(
                     "Index '{}' dropped from table '{}'",

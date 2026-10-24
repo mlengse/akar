@@ -968,9 +968,7 @@ impl RelTable {
         if let Some(type_idx) = self.columns.iter().position(|c| c.name == "type") {
             if let Some(Value::String(s)) = values.get(type_idx) {
                 if s.is_empty() {
-                    return Err(StorageError::Page(
-                        "Relationship type cannot be empty".to_string(),
-                    ));
+                    return Err(StorageError::Page("Relationship type cannot be empty".to_string()));
                 }
             }
         }
@@ -979,9 +977,7 @@ impl RelTable {
         let valid_from_idx = self.columns.iter().position(|c| c.name == "valid_from");
         let valid_to_idx = self.columns.iter().position(|c| c.name == "valid_to");
         if let (Some(vf_idx), Some(vt_idx)) = (valid_from_idx, valid_to_idx) {
-            if let (Some(Value::Int64(vf)), Some(Value::Int64(vt))) =
-                (values.get(vf_idx), values.get(vt_idx))
-            {
+            if let (Some(Value::Int64(vf)), Some(Value::Int64(vt))) = (values.get(vf_idx), values.get(vt_idx)) {
                 if vf > vt {
                     return Err(StorageError::Page(
                         "Validity window is inverted: valid_from > valid_to".to_string(),
@@ -1034,7 +1030,8 @@ impl RelTable {
                 if let Some(Value::String(s)) = vals.get(type_idx) {
                     if s.is_empty() {
                         return Err(StorageError::Page(format!(
-                            "Rel {}: relationship type cannot be empty", i
+                            "Rel {}: relationship type cannot be empty",
+                            i
                         )));
                     }
                 }
@@ -1044,12 +1041,11 @@ impl RelTable {
             let valid_from_idx = self.columns.iter().position(|c| c.name == "valid_from");
             let valid_to_idx = self.columns.iter().position(|c| c.name == "valid_to");
             if let (Some(vf_idx), Some(vt_idx)) = (valid_from_idx, valid_to_idx) {
-                if let (Some(Value::Int64(vf)), Some(Value::Int64(vt))) =
-                    (vals.get(vf_idx), vals.get(vt_idx))
-                {
+                if let (Some(Value::Int64(vf)), Some(Value::Int64(vt))) = (vals.get(vf_idx), vals.get(vt_idx)) {
                     if vf > vt {
                         return Err(StorageError::Page(format!(
-                            "Rel {}: Validity window is inverted: valid_from > valid_to", i
+                            "Rel {}: Validity window is inverted: valid_from > valid_to",
+                            i
                         )));
                     }
                 }
@@ -1701,17 +1697,67 @@ impl TableCatalog {
     }
 
     /// Find the name of a secondary index on the given table+column, if any.
-    pub fn find_secondary_index_for_column(
-        &self,
-        table_name: &str,
-        column_name: &str,
-    ) -> Option<String> {
+    pub fn find_secondary_index_for_column(&self, table_name: &str, column_name: &str) -> Option<String> {
         self.secondary_indexes
             .iter()
-            .find(|entry| {
-                entry.value().table_name == table_name && entry.value().column_name == column_name
-            })
+            .find(|entry| entry.value().table_name == table_name && entry.value().column_name == column_name)
             .map(|entry| entry.key().clone())
+    }
+
+    /// Names of every secondary index declared on `table_name`, with the column
+    /// each one covers. Used to keep indexes current on every insert.
+    pub fn secondary_indexes_for_table(&self, table_name: &str) -> Vec<(String, String)> {
+        self.secondary_indexes
+            .iter()
+            .filter(|entry| entry.value().table_name == table_name)
+            .map(|entry| (entry.key().clone(), entry.value().column_name.clone()))
+            .collect()
+    }
+
+    /// The `(index name, key)` pairs an inserted row must be registered under.
+    ///
+    /// Call this **before** the row is inserted (it only reads `values`), then
+    /// pass the result to [`Self::apply_secondary_index_keys`] once the row has
+    /// a row offset. Columns holding `NULL` are not indexed.
+    pub fn secondary_index_keys(&self, table_name: &str, values: &[Value]) -> Vec<(String, String)> {
+        let Some(table) = self.get_node_table_by_name(table_name) else {
+            return Vec::new();
+        };
+        self.secondary_index_keys_for_columns(table_name, &table.columns, values)
+    }
+
+    /// [`Self::secondary_index_keys`] for a caller that already holds the table
+    /// definition.
+    ///
+    /// Taking the columns avoids re-locking the node-table map, which would
+    /// deadlock when the caller holds a mutable table guard.
+    pub fn secondary_index_keys_for_columns(
+        &self,
+        table_name: &str,
+        columns: &[ColumnDefinition],
+        values: &[Value],
+    ) -> Vec<(String, String)> {
+        self.secondary_indexes_for_table(table_name)
+            .into_iter()
+            .filter_map(|(index_name, column)| {
+                let column_idx = columns.iter().position(|c| c.name == column)?;
+                let value = values.get(column_idx)?;
+                if matches!(value, Value::Null) {
+                    return None;
+                }
+                Some((index_name, pk_value_to_string(value)))
+            })
+            .collect()
+    }
+
+    /// Record an inserted row in every secondary index key collected by
+    /// [`Self::secondary_index_keys`] (FR-006).
+    pub fn apply_secondary_index_keys(&self, keys: Vec<(String, String)>, row_id: u64) {
+        for (index_name, key) in keys {
+            if let Some(mut index) = self.get_secondary_index_mut(&index_name) {
+                index.insert(key, row_id);
+            }
+        }
     }
 
     /// Rebuild a vector index from the current contents of its node table.
@@ -2365,7 +2411,12 @@ mod tests {
         let result = rel.insert_rel(
             0,
             1,
-            vec![Value::String("".into()), Value::Int64(2020), Value::Int64(2021), Value::Int64(2025)],
+            vec![
+                Value::String("".into()),
+                Value::Int64(2020),
+                Value::Int64(2021),
+                Value::Int64(2025),
+            ],
         );
         assert!(result.is_err());
         assert_eq!(rel.num_rows, 0);

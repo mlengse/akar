@@ -68,7 +68,7 @@ pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use string_dictionary::StringDictionary;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 pub use undo_buffer::UndoBuffer;
-pub use vector_index::{VectorIndexTable, extract_f64_list_from_value, extract_f32_list_from_value};
+pub use vector_index::{VectorIndexTable, extract_f32_list_from_value, extract_f64_list_from_value};
 pub use wal::WalSink;
 pub use wal_replayer::{ReplayResult, WALReplayer};
 
@@ -468,8 +468,10 @@ impl StorageManager {
     // ==================== Secondary Indexes ====================
 
     /// Create a secondary index on a non-PK column and register its file with
-    /// the BufferManager. If `if_not_exists` is true and an index with the same
-    /// name already exists, succeeds silently (FR-001 / FR-003).
+    /// the BufferManager. Existing rows are backfilled and the index is marked
+    /// `Available`, so a declaration on an already-populated table answers
+    /// lookups immediately (FR-003). If `if_not_exists` is true and an index
+    /// with the same name already exists, succeeds silently (FR-001).
     pub fn create_secondary_index(
         &self,
         name: String,
@@ -478,9 +480,11 @@ impl StorageManager {
         index_type: akar_catalog::IndexType,
         if_not_exists: bool,
     ) -> Result<(), StorageError> {
-        // If-not-exists: check if already registered in TableCatalog
-        if if_not_exists && self.table_catalog.get_secondary_index(&name).is_some() {
-            return Ok(());
+        if self.table_catalog.get_secondary_index(&name).is_some() {
+            if if_not_exists {
+                return Ok(());
+            }
+            return Err(StorageError::Index(format!("Secondary index '{name}' already exists")));
         }
 
         let db_path = self.db_path.clone();
@@ -501,15 +505,68 @@ impl StorageManager {
 
         // Create in TableCatalog
         self.table_catalog
-            .create_secondary_index(name, table_name, column_name, index_type, file_name)
-            .map_err(|e| StorageError::Index(e))
+            .create_secondary_index(name.clone(), table_name, column_name, index_type, file_name)
+            .map_err(StorageError::Index)?;
+
+        self.backfill_secondary_index(&name)
+    }
+
+    /// Populate a secondary index from the current contents of its node table
+    /// and mark it `Available` (FR-003). Idempotent: re-running overwrites the
+    /// same key → row mappings.
+    pub fn backfill_secondary_index(&self, name: &str) -> Result<(), StorageError> {
+        let (table_name, column_name) = {
+            let index = self
+                .table_catalog
+                .get_secondary_index(name)
+                .ok_or_else(|| StorageError::Index(format!("Secondary index '{name}' not found")))?;
+            (index.table_name.clone(), index.column_name.clone())
+        };
+
+        let mut keys: Vec<(String, u64)> = Vec::new();
+        {
+            let node_table = self
+                .table_catalog
+                .get_node_table_by_name(&table_name)
+                .ok_or_else(|| StorageError::TableNotFound(format!("Table '{table_name}' not found")))?;
+            let column = node_table
+                .columns
+                .iter()
+                .position(|c| c.name == column_name)
+                .ok_or_else(|| {
+                    StorageError::Index(format!("Column '{column_name}' not found on table '{table_name}'"))
+                })?;
+            let num_rows = node_table.num_rows as usize;
+            keys.reserve(num_rows);
+            for row in 0..num_rows {
+                if let Some(value) = node_table.get_value(row, column) {
+                    if !matches!(value, Value::Null) {
+                        keys.push((pk_value_to_string(value), row as u64));
+                    }
+                }
+            }
+        }
+
+        let mut bm = self
+            .buffer_manager
+            .lock()
+            .map_err(|e| StorageError::BufferManager(format!("Lock poisoned: {e}")))?;
+        let mut index = self
+            .table_catalog
+            .get_secondary_index_mut(name)
+            .ok_or_else(|| StorageError::Index(format!("Secondary index '{name}' not found")))?;
+        for (key, row_id) in keys {
+            index.insert(key, row_id);
+        }
+        index.mark_available();
+        index
+            .flush(&mut bm)
+            .map_err(|e| StorageError::Index(format!("index flush failed: {e}")))?;
+        Ok(())
     }
 
     /// Get a reference to a secondary index by name.
-    pub fn get_secondary_index(
-        &self,
-        name: &str,
-    ) -> Option<dashmap::mapref::one::Ref<'_, String, SecondaryIndex>> {
+    pub fn get_secondary_index(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, String, SecondaryIndex>> {
         self.table_catalog.get_secondary_index(name)
     }
 
@@ -576,18 +633,31 @@ impl StorageManager {
         values: Vec<Value>,
         txn_id: Option<u64>,
     ) -> Result<(u64, bool), StorageError> {
-        // Find the content_identity_fingerprint column index.
-        let fingerprint_col_idx = {
+        // Find the content_identity_fingerprint column index and collect the
+        // keys the table's secondary indexes need for this row (FR-006).
+        let (fingerprint_col_idx, secondary_keys) = {
             let node_table = self
                 .table_catalog
                 .get_node_table_by_name(table_name)
-                .ok_or_else(|| {
-                    StorageError::TableNotFound(format!("Table '{table_name}' not found"))
-                })?;
-            node_table
+                .ok_or_else(|| StorageError::TableNotFound(format!("Table '{table_name}' not found")))?;
+            let fingerprint_col_idx = node_table
                 .columns
                 .iter()
-                .position(|c| c.name == "content_identity_fingerprint")
+                .position(|c| c.name == "content_identity_fingerprint");
+            let secondary_keys: Vec<(String, String)> = self
+                .table_catalog
+                .secondary_indexes_for_table(table_name)
+                .into_iter()
+                .filter_map(|(index_name, column)| {
+                    let col_idx = node_table.columns.iter().position(|c| c.name == column)?;
+                    let value = values.get(col_idx)?;
+                    if matches!(value, Value::Null) {
+                        return None;
+                    }
+                    Some((index_name, pk_value_to_string(value)))
+                })
+                .collect();
+            (fingerprint_col_idx, secondary_keys)
         };
 
         let fingerprint_key = fingerprint_col_idx.map(|col_idx| pk_value_to_string(&values[col_idx]));
@@ -599,11 +669,9 @@ impl StorageManager {
                 .find_secondary_index_for_column(table_name, "content_identity_fingerprint")
                 .is_some()
             {
-                if let Some(existing_row_id) = self.lookup_secondary_index(
-                    table_name,
-                    "content_identity_fingerprint",
-                    key,
-                )? {
+                if let Some(existing_row_id) =
+                    self.lookup_secondary_index(table_name, "content_identity_fingerprint", key)?
+                {
                     // Duplicate fingerprint — return existing row, do not insert.
                     return Ok((existing_row_id, true));
                 }
@@ -611,23 +679,19 @@ impl StorageManager {
         }
 
         // Not a duplicate — insert the row.
-        let mut node_table = self
-            .table_catalog
-            .get_node_table_by_name_mut(table_name)
-            .ok_or_else(|| {
-                StorageError::TableNotFound(format!("Table '{table_name}' not found"))
-            })?;
-        let row_id = node_table.insert_row_with_txn(values, txn_id)?;
-
-        // Add the fingerprint to the secondary index if one exists.
-        if let (_, Some(key)) = (fingerprint_col_idx, fingerprint_key) {
-            if let Some(index_name) = self
+        let row_id = {
+            let mut node_table = self
                 .table_catalog
-                .find_secondary_index_for_column(table_name, "content_identity_fingerprint")
-            {
-                if let Some(mut idx) = self.table_catalog.get_secondary_index_mut(&index_name) {
-                    idx.insert(key, row_id);
-                }
+                .get_node_table_by_name_mut(table_name)
+                .ok_or_else(|| StorageError::TableNotFound(format!("Table '{table_name}' not found")))?;
+            node_table.insert_row_with_txn(values, txn_id)?
+        };
+
+        // Keep every declared secondary index current: a row written after the
+        // index was built must be findable through it (FR-006).
+        for (index_name, key) in secondary_keys {
+            if let Some(mut idx) = self.table_catalog.get_secondary_index_mut(&index_name) {
+                idx.insert(key, row_id);
             }
         }
 

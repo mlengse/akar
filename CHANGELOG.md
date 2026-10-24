@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Secondary indexes are now end-to-end usable (feature 021, FR-001–FR-006)** · gate `cargo test -p akar-main --test test_secondary_index` **8 passed / 0 failed** · `cargo test -p akar-catalog -p akar-storage -p akar-planner` **375 passed / 0 failed** · `python tools/doc-check.py --root akar` PASS
+  - `NodeTableEntry` carries a `secondary_indexes` list (`#[serde(default)]`, so older `catalog.json` files stay readable) instead of overloading the single primary-key index slot. `create_index`/`drop_index` no longer clobber the PK metadata, and `CALL show_indexes()` lists declared secondary indexes.
+  - `CREATE HASH INDEX` on a non-PK column now reaches `StorageManager::create_secondary_index`; the index is backfilled from existing rows and marked `Available` (FR-003), restored on open and rebuilt after WAL replay (FR-005). Every node-insert path maintains the indexes (`TableCatalog::secondary_index_keys_for_columns` / `apply_secondary_index_keys`).
+  - The planner is now constructed `with_catalog` on the real execution path (it previously never was, so the index-selection pass was dead code). It recognises both equality and `IN [..]` set-membership predicates, and `PhysicalIndexScan` returns every row stored under a key rather than only the last one.
+  - **Benchmark pending:** per-row dedup p95 at 1k vs 10k memories is still unmeasured (SC-001, FR-026).
+
+- **Typed multi-edge relationships (feature 021, FR-013–FR-017)** · gate `cargo test -p akar-main --test test_typed_edges` **6 passed / 0 failed**
+  - The batched edge writer (`akar-main/src/bulk.rs`) now includes `type` in the `MERGE` identity, so `similar` and `contradicts` coexist on one pair (FR-013) while re-writing a type updates in place (FR-014). `created_at` is create-once via `coalesce`, so a rewrite does not reset the original timestamp.
+
 ## [0.3.2] - 2026-10-24
 
 - **feat(storage) - Feature 020 / T006–T020: secondary index + dedup write path (2026-10-23)** · gate `test [akar-core]` **368 passed / 0 failed** (akar-storage) + **187 passed / 0 failed** (akar-processor) · `cargo check --workspace` clean · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean

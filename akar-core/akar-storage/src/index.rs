@@ -582,6 +582,11 @@ pub struct SecondaryIndex {
     pub state: IndexState,
     /// On-disk hash index backing store. Keys are hex-encoded fingerprint bytes.
     pub index: OnDiskHashIndex<String>,
+    /// In-memory multimap: one key may map to several row offsets, because a
+    /// secondary index is declared on a non-unique column (FR-002). The on-disk
+    /// hash index stores one offset per key; this map is the authoritative
+    /// lookup structure and is rebuilt from the table on every open.
+    entries: HashMap<String, Vec<u64>>,
 }
 
 impl SecondaryIndex {
@@ -600,6 +605,7 @@ impl SecondaryIndex {
             index_type,
             state: IndexState::Building,
             index: OnDiskHashIndex::new(&file_name),
+            entries: HashMap::new(),
         }
     }
 
@@ -628,12 +634,44 @@ impl SecondaryIndex {
         if !self.is_available() {
             return Ok(None);
         }
+        if let Some(offsets) = self.entries.get(key) {
+            return Ok(offsets.first().copied());
+        }
         self.index.lookup(key, bm)
     }
 
-    /// Insert a key → row offset mapping into the L1 cache.
+    /// Look up every row offset stored under `key`.
+    ///
+    /// A secondary index is declared on a non-unique column, so one key can
+    /// match any number of rows (FR-002). Returns an empty vector when the
+    /// index is not `Available` or the key is absent.
+    pub fn lookup_all(&self, key: &str, bm: &mut BufferManager) -> std::io::Result<Vec<u64>> {
+        if !self.is_available() {
+            return Ok(Vec::new());
+        }
+        if let Some(offsets) = self.entries.get(key) {
+            return Ok(offsets.clone());
+        }
+        Ok(self.index.lookup(&key.to_string(), bm)?.into_iter().collect())
+    }
+
+    /// Insert a key → row offset mapping into the index.
     pub fn insert(&mut self, key: String, offset: u64) {
+        let offsets = self.entries.entry(key.clone()).or_default();
+        if !offsets.contains(&offset) {
+            offsets.push(offset);
+        }
+        // Keep the durable copy pointing at the most recent offset; the
+        // in-memory multimap is what serves lookups.
         self.index.insert(key, offset);
+    }
+
+    /// Remove a row offset from every key it was stored under.
+    pub fn remove_row(&mut self, offset: u64) {
+        self.entries.retain(|_, offsets| {
+            offsets.retain(|candidate| *candidate != offset);
+            !offsets.is_empty()
+        });
     }
 }
 
@@ -864,18 +902,9 @@ mod tests {
         assert!(idx.is_available());
 
         // Lookup via disk
-        assert_eq!(
-            idx.lookup(&"fp-a".to_string(), &mut bm).unwrap(),
-            Some(0)
-        );
-        assert_eq!(
-            idx.lookup(&"fp-b".to_string(), &mut bm).unwrap(),
-            Some(1)
-        );
-        assert_eq!(
-            idx.lookup(&"fp-c".to_string(), &mut bm).unwrap(),
-            None
-        );
+        assert_eq!(idx.lookup(&"fp-a".to_string(), &mut bm).unwrap(), Some(0));
+        assert_eq!(idx.lookup(&"fp-b".to_string(), &mut bm).unwrap(), Some(1));
+        assert_eq!(idx.lookup(&"fp-c".to_string(), &mut bm).unwrap(), None);
     }
 
     #[test]
@@ -890,15 +919,12 @@ mod tests {
         );
         // Still Building — lookup returns None (scan fallback)
         idx.insert("fp-x".to_string(), 5);
-        assert_eq!(
-            idx.lookup(&"fp-x".to_string(), &mut bm).unwrap(),
-            None
-        );
+        assert_eq!(idx.lookup(&"fp-x".to_string(), &mut bm).unwrap(), None);
     }
 
     #[test]
     fn test_secondary_index_mark_dropped() {
-        let (mut bm, _dir) = create_test_bm();
+        let (_bm, _dir) = create_test_bm();
         let mut idx = SecondaryIndex::new(
             "si_drop".to_string(),
             "Memory".to_string(),

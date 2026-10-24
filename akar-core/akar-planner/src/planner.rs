@@ -44,60 +44,59 @@ fn take_fts_if_table(fts: &mut Option<LogicalFtsScan>, table: &str) -> Option<Lo
     }
 }
 
-/// Try to extract an equality predicate `(variable, column, value)` from an
-/// expression. Handles a single equality or an AND of equalities.
-/// Returns the first matching equality found, or `None`.
-fn extract_equality_predicate(expr: &Expression) -> Option<(String, String, Value)> {
+/// Extract an index-usable predicate from an expression.
+///
+/// Recognises equality (`variable.column = <literal>`) and set-membership
+/// (`variable.column IN [<literals>]`), including either side of an `AND`.
+/// Returns `(variable, column, values)`; `values` is never empty.
+fn extract_index_predicate(expr: &Expression) -> Option<(String, String, Vec<Value>)> {
     match expr {
         Expression::BinaryOp(op, left, right) => match op {
             akar_parser::ast::BinaryOp::Equal => {
-                match (left.as_ref(), right.as_ref()) {
-                    (
-                        Expression::PropertyAccess(box_var, col),
-                        Expression::Constant(_),
-                    ) => {
-                        if let Expression::Variable(var) = box_var.as_ref() {
-                            return Some((
-                                var.clone(),
-                                col.clone(),
-                                eval_standalone_expr(right)?,
-                            ));
-                        }
-                    }
-                    (
-                        Expression::Constant(_),
-                        Expression::PropertyAccess(box_var, col),
-                    ) => {
-                        if let Expression::Variable(var) = box_var.as_ref() {
-                            return Some((
-                                var.clone(),
-                                col.clone(),
-                                eval_standalone_expr(left)?,
-                            ));
-                        }
-                    }
-                    _ => {}
+                let (var, column, value) =
+                    index_equality_parts(left, right).or_else(|| index_equality_parts(right, left))?;
+                Some((var, column, vec![value]))
+            }
+            akar_parser::ast::BinaryOp::In => {
+                let Expression::PropertyAccess(box_var, column) = left.as_ref() else {
+                    return None;
+                };
+                let Expression::Variable(var) = box_var.as_ref() else {
+                    return None;
+                };
+                let Expression::List(items) = right.as_ref() else {
+                    return None;
+                };
+                let values: Vec<Value> = items.iter().filter_map(eval_standalone_expr).collect();
+                if values.is_empty() || values.len() != items.len() {
+                    return None;
                 }
-                None
+                Some((var.clone(), column.clone(), values))
             }
-            akar_parser::ast::BinaryOp::And => {
-                extract_equality_predicate(left.as_ref())
-                    .or_else(|| extract_equality_predicate(right.as_ref()))
-            }
+            akar_parser::ast::BinaryOp::And => extract_index_predicate(left).or_else(|| extract_index_predicate(right)),
             _ => None,
         },
         _ => None,
     }
 }
 
-/// Remove an equality predicate on `(variable, column)` from an expression.
-/// Returns `None` if the expression was entirely that predicate, otherwise the
-/// expression with the predicate removed (AND branches flattened).
-fn remove_equality_predicate(
-    expr: Expression,
-    var: &str,
-    col: &str,
-) -> Option<Expression> {
+/// The `(variable, column, value)` triple of `column_access = constant`, if
+/// `column_access` is a property access on a variable and `value` evaluates.
+fn index_equality_parts(column_access: &Expression, value: &Expression) -> Option<(String, String, Value)> {
+    let Expression::PropertyAccess(box_var, column) = column_access else {
+        return None;
+    };
+    let Expression::Variable(var) = box_var.as_ref() else {
+        return None;
+    };
+    Some((var.clone(), column.clone(), eval_standalone_expr(value)?))
+}
+
+/// Remove an index-usable predicate on `(variable, column)` from an
+/// expression. Handles equality (`=`), set-membership (`IN`) and either branch
+/// of an `AND`. Returns `None` if the expression was entirely that predicate,
+/// otherwise the expression with the predicate removed.
+fn remove_equality_predicate(expr: Expression, var: &str, col: &str) -> Option<Expression> {
     match expr {
         Expression::BinaryOp(op, ref left, ref right) => match op {
             akar_parser::ast::BinaryOp::Equal => {
@@ -112,6 +111,16 @@ fn remove_equality_predicate(
                         Expression::PropertyAccess(box_v, c),
                     ) if matches!(box_v.as_ref(), Expression::Variable(v) if v == var && c == col)
                 );
+                if is_match {
+                    None
+                } else {
+                    Some(Expression::BinaryOp(op, left.clone(), right.clone()))
+                }
+            }
+            akar_parser::ast::BinaryOp::In => {
+                let is_match = matches!(left.as_ref(),
+                    Expression::PropertyAccess(box_v, c)
+                        if matches!(box_v.as_ref(), Expression::Variable(v) if v == var && c == col));
                 if is_match {
                     None
                 } else {
@@ -425,6 +434,7 @@ impl QueryPlanner {
             index_name: idx.index_name,
             table_name: idx.table_name,
             column_name: idx.column_name,
+            if_not_exists: idx.if_not_exists,
             cardinality: 1,
         })])
     }
@@ -1225,37 +1235,32 @@ impl QueryPlanner {
             for scan in scan_ops {
                 let mut replaced = false;
                 if let LogicalOperator::ScanNode(s) = &scan {
-                    if let Some(index_column) = cat.get_secondary_index_column(&s.table_name) {
-                        if let Some(filter) = filter_expr.as_ref() {
-                            if let Some((var, column, value)) =
-                                extract_equality_predicate(&filter.expression)
-                            {
-                                if var.as_str() == s.alias.as_deref().unwrap_or("")
-                                    && column.as_str() == index_column
-                                {
-                                    let index_name = cat
-                                        .get_index_info(&s.table_name)
-                                        .map(|(_, n)| n)
-                                        .unwrap_or_default();
-                                    new_scan_ops.push(LogicalOperator::IndexScan(
-                                        LogicalIndexScan {
-                                            table_name: s.table_name.clone(),
-                                            table_id: s.table_id,
-                                            alias: s.alias.clone(),
-                                            column_name: column.clone(),
-                                            index_name,
-                                            values: vec![value],
-                                            cardinality: s.cardinality,
-                                        },
-                                    ));
+                    if let Some(filter) = filter_expr.as_ref() {
+                        // `extract_index_predicate` borrows the filter, so the
+                        // owning `filter_expr` is replaced only after the plan
+                        // operator has been built from the borrowed parts.
+                        let candidate = extract_index_predicate(&filter.expression);
+                        if let Some((var, column, values)) = candidate {
+                            if var.as_str() == s.alias.as_deref().unwrap_or("") {
+                                if let Some(index) = cat.secondary_index_for_column(&s.table_name, &column) {
+                                    new_scan_ops.push(LogicalOperator::IndexScan(LogicalIndexScan {
+                                        table_name: s.table_name.clone(),
+                                        table_id: s.table_id,
+                                        alias: s.alias.clone(),
+                                        column_name: column.clone(),
+                                        index_name: index.name,
+                                        values,
+                                        cardinality: s.cardinality,
+                                    }));
                                     filter_expr = filter_expr.take().and_then(|f| {
-                                        remove_equality_predicate(f.expression, &var, &column)
-                                            .map(|e| BoundExpression {
+                                        remove_equality_predicate(f.expression, &var, &column).map(|e| {
+                                            BoundExpression {
                                                 expression: e,
                                                 resolved_type: f.resolved_type,
                                                 is_constant: f.is_constant,
                                                 alias: f.alias,
-                                            })
+                                            }
+                                        })
                                     });
                                     replaced = true;
                                 }
