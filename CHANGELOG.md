@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-24
+
 - **feat(storage) - Feature 020 / T006–T020: secondary index + dedup write path (2026-10-23)** · gate `test [akar-core]` **368 passed / 0 failed** (akar-storage) + **187 passed / 0 failed** (akar-processor) · `cargo check --workspace` clean · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean
   - `bind_create_index` (`akar-core/akar-binder/src/binder/mod.rs`) now rejects PK columns and allows secondary indexes on non-PK properties (FR-001); `conflict_action` / `IF NOT EXISTS` wired AST → binder → catalog (FR-003); catalog PK check inverted in `create_index` (`akar-core/akar-catalog/src/lib.rs`).
   - New `SecondaryIndex` struct with `Building → Available → Dropped` state machine on `OnDiskHashIndex<String>` (`akar-core/akar-storage/src/index.rs`), wired through `TableCatalog` + `StorageManager` with BufferManager registration, introspection (`list_secondary_indexes`, `get_secondary_index`), and dedup lookup (`lookup_secondary_index`, FR-004/005).
@@ -903,6 +905,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.3.2]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.2
 [0.3.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.0
 [0.2.5]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.5
 [0.2.4]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.4

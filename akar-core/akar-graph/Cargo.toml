@@ -11,8 +11,8 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-akar-common = { path = "../akar-common", version = "0.3.1" }
-akar-storage = { path = "../akar-storage", version = "0.3.1" }
+akar-common = { path = "../akar-common", version = "0.3.2" }
+akar-storage = { path = "../akar-storage", version = "0.3.2" }
 hashbrown.workspace = true
 
 [lints]

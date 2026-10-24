@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "akar-algo"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "akar-azure"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -61,7 +61,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "akar-c"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-main",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "akar-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "arrow",
  "flate2",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "akar-delta"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "akar-duckdb"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "arrow",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "akar-graph"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-storage",
@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "akar-httpfs"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "akar-iceberg"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "akar-json"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "akar-llm"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-algo",
  "akar-azure",
@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "akar-markdown"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "akar-migrate"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-main",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "akar-ml"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "akar-neo4j"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-extension",
  "akar-function",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "pest",
  "pest_derive",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -370,7 +370,7 @@ dependencies = [
 
 [[package]]
 name = "akar-postgres"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "akar-binder",
@@ -406,14 +406,14 @@ dependencies = [
 
 [[package]]
 name = "akar-search"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "hashbrown 0.17.1",
 ]
 
 [[package]]
 name = "akar-sqlite"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "tracing",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "akar-unity-catalog"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-duckdb",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "akar-common",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "akar-wasm"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "akar-common",
  "akar-main",
