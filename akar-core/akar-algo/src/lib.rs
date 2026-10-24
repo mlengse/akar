@@ -1800,6 +1800,152 @@ pub struct SpreadActivationResult {
     pub activated: Vec<(usize, f64, usize)>,
 }
 
+/// Scratch state buffers for spreading activation, hoisted across hops and batch runs.
+struct SpreadScratch {
+    activation: Vec<f64>,
+    hop_reached: Vec<usize>,
+    next_act_scratch: Vec<f64>,
+    stamp: Vec<usize>,
+    visited: Vec<usize>,
+    touched: Vec<usize>,
+    current_frontier: Vec<(usize, f64)>,
+    next_frontier: Vec<(usize, f64)>,
+}
+
+impl SpreadScratch {
+    fn new(n: usize) -> Self {
+        Self {
+            activation: vec![0.0; n],
+            hop_reached: vec![usize::MAX; n],
+            next_act_scratch: vec![0.0; n],
+            stamp: vec![0; n],
+            visited: Vec::with_capacity(16),
+            touched: Vec::with_capacity(16),
+            current_frontier: Vec::with_capacity(16),
+            next_frontier: Vec::with_capacity(16),
+        }
+    }
+
+    /// Reset modified nodes in O(|R(s)|) time based on `visited` tracking,
+    /// avoiding full O(N) buffer re-allocations or graph-wide clears.
+    fn reset(&mut self) {
+        for &pos in &self.visited {
+            self.activation[pos] = 0.0;
+            self.hop_reached[pos] = usize::MAX;
+            self.stamp[pos] = 0;
+            self.next_act_scratch[pos] = 0.0;
+        }
+        self.visited.clear();
+        self.touched.clear();
+        self.current_frontier.clear();
+        self.next_frontier.clear();
+    }
+}
+
+fn compute_spread_activation_impl<F>(
+    csr: &CSRAdjacency,
+    seed_positions: &[(usize, f64)],
+    weight_fn: F,
+    decay: f64,
+    threshold: f64,
+    max_hops: usize,
+    scratch: &mut SpreadScratch,
+) -> SpreadActivationResult
+where
+    F: Fn(usize, usize) -> f64,
+{
+    let n = csr.num_nodes();
+    if n == 0 || seed_positions.is_empty() {
+        return SpreadActivationResult { activated: Vec::new() };
+    }
+
+    // Initialize seeds at hop 0
+    for &(pos, act) in seed_positions {
+        if pos < n && act > 0.0 {
+            if scratch.hop_reached[pos] == usize::MAX {
+                scratch.hop_reached[pos] = 0;
+                scratch.visited.push(pos);
+            }
+            scratch.activation[pos] = act;
+            scratch.current_frontier.push((pos, act));
+        }
+    }
+
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
+    // Propagate hop by hop
+    for hop in 1..=max_hops {
+        scratch.touched.clear();
+        scratch.next_frontier.clear();
+
+        for &(node, _node_act) in &scratch.current_frontier {
+            let total_act = scratch.activation[node];
+            let start = offsets[node];
+            let end = offsets[node + 1];
+            for (_rel, dst) in &adjacency[start..end] {
+                let w = dst.offset as usize;
+                if w >= n {
+                    continue;
+                }
+                // Skip nodes already activated at an earlier hop (prevent cycle inflation)
+                if scratch.hop_reached[w] != usize::MAX && scratch.hop_reached[w] < hop {
+                    continue;
+                }
+                let edge_weight = weight_fn(node, w);
+                let propagated = total_act * edge_weight * decay;
+                if propagated < threshold {
+                    continue;
+                }
+                if scratch.stamp[w] != hop {
+                    scratch.stamp[w] = hop;
+                    scratch.next_act_scratch[w] = 0.0;
+                    scratch.touched.push(w);
+                }
+                scratch.next_act_scratch[w] += propagated;
+            }
+        }
+
+        // Sorting `touched` guarantees visiting neighbor candidates in ascending node ID order,
+        // matching BTreeMap iteration order and maintaining deterministic execution.
+        scratch.touched.sort_unstable();
+
+        for &w in &scratch.touched {
+            let prop = scratch.next_act_scratch[w];
+            scratch.activation[w] += prop;
+            if scratch.hop_reached[w] == usize::MAX {
+                scratch.hop_reached[w] = hop;
+                scratch.visited.push(w);
+            }
+            // Only add to frontier if first time reaching this node
+            // (same-hop accumulation is folded into activation but doesn't re-propagate)
+            if scratch.hop_reached[w] == hop {
+                scratch.next_frontier.push((w, prop));
+            }
+        }
+
+        std::mem::swap(&mut scratch.current_frontier, &mut scratch.next_frontier);
+        if scratch.current_frontier.is_empty() {
+            break;
+        }
+    }
+
+    // Bolt ⚡ Performance Optimization:
+    // Iterate over `visited` rather than performing a full O(N) array scan over all graph nodes.
+    // Collect activated nodes in O(|R(s)|) time.
+    let mut activated: Vec<(usize, f64, usize)> = Vec::with_capacity(scratch.visited.len());
+    for &pos in &scratch.visited {
+        let hop = scratch.hop_reached[pos];
+        let act = scratch.activation[pos];
+        if hop <= max_hops && act >= threshold {
+            activated.push((pos, act, hop));
+        }
+    }
+    activated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    SpreadActivationResult { activated }
+}
+
 /// Spreading activation over a graph starting from seed nodes.
 ///
 /// - `seed_positions`: starting node positions with initial activation
@@ -1819,101 +1965,8 @@ where
     F: Fn(usize, usize) -> f64,
 {
     let n = csr.num_nodes();
-    if n == 0 || seed_positions.is_empty() {
-        return SpreadActivationResult { activated: Vec::new() };
-    }
-
-    // activation[node_pos] = (current_activation, hop_when_activated)
-    let mut activation: Vec<f64> = vec![0.0; n];
-    let mut hop_reached: Vec<usize> = vec![usize::MAX; n];
-
-    // Initialize seeds at hop 0
-    let mut current_frontier: Vec<(usize, f64)> = Vec::new();
-    for &(pos, act) in seed_positions {
-        if pos < n && act > 0.0 {
-            activation[pos] = act;
-            hop_reached[pos] = 0;
-            current_frontier.push((pos, act));
-        }
-    }
-
-    // Bolt ⚡ Performance Optimization:
-    // Hoist scratch buffers out of the per-hop loop to eliminate dynamic memory allocations.
-    // Replace BTreeMap with a generation-stamped scratch array (`stamp[w] == hop`) to achieve
-    // O(1) indexed accumulation instead of O(log K) tree search/rebalances.
-    let mut next_act_scratch: Vec<f64> = vec![0.0; n];
-    let mut stamp: Vec<usize> = vec![0; n];
-    let mut touched: Vec<usize> = Vec::with_capacity(16);
-    let mut next_frontier: Vec<(usize, f64)> = Vec::with_capacity(current_frontier.len() * 2);
-
-    let offsets = &csr.offsets;
-    let adjacency = &csr.adjacency;
-
-    // Propagate hop by hop
-    for hop in 1..=max_hops {
-        touched.clear();
-        next_frontier.clear();
-
-        for &(node, _node_act) in &current_frontier {
-            let total_act = activation[node];
-            let start = offsets[node];
-            let end = offsets[node + 1];
-            for (_rel, dst) in &adjacency[start..end] {
-                let w = dst.offset as usize;
-                if w >= n {
-                    continue;
-                }
-                // Skip nodes already activated at an earlier hop (prevent cycle inflation)
-                if hop_reached[w] != usize::MAX && hop_reached[w] < hop {
-                    continue;
-                }
-                let edge_weight = weight_fn(node, w);
-                let propagated = total_act * edge_weight * decay;
-                if propagated < threshold {
-                    continue;
-                }
-                if stamp[w] != hop {
-                    stamp[w] = hop;
-                    next_act_scratch[w] = 0.0;
-                    touched.push(w);
-                }
-                next_act_scratch[w] += propagated;
-            }
-        }
-
-        // Sorting `touched` guarantees visiting neighbor candidates in ascending node ID order,
-        // matching BTreeMap iteration order and maintaining deterministic execution.
-        touched.sort_unstable();
-
-        for &w in &touched {
-            let prop = next_act_scratch[w];
-            activation[w] += prop;
-            if hop_reached[w] == usize::MAX {
-                hop_reached[w] = hop;
-            }
-            // Only add to frontier if first time reaching this node
-            // (same-hop accumulation is folded into activation but doesn't re-propagate)
-            if hop_reached[w] == hop {
-                next_frontier.push((w, prop));
-            }
-        }
-
-        std::mem::swap(&mut current_frontier, &mut next_frontier);
-        if current_frontier.is_empty() {
-            break;
-        }
-    }
-
-    // Collect activated nodes (excluding seeds at hop 0, include only propagated nodes)
-    let mut activated: Vec<(usize, f64, usize)> = Vec::new();
-    for pos in 0..n {
-        if hop_reached[pos] <= max_hops && activation[pos] >= threshold {
-            activated.push((pos, activation[pos], hop_reached[pos]));
-        }
-    }
-    activated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    SpreadActivationResult { activated }
+    let mut scratch = SpreadScratch::new(n);
+    compute_spread_activation_impl(csr, seed_positions, weight_fn, decay, threshold, max_hops, &mut scratch)
 }
 
 /// Batch spreading activation: build CSR once, run BFS from each seed independently.
@@ -1937,7 +1990,8 @@ pub fn batch_spread_activation(
     max_hops: usize,
     k_per_seed: usize,
 ) -> std::collections::HashMap<usize, Vec<(usize, f64, usize)>> {
-    let mut results: std::collections::HashMap<usize, Vec<(usize, f64, usize)>> = std::collections::HashMap::new();
+    let mut results: std::collections::HashMap<usize, Vec<(usize, f64, usize)>> =
+        std::collections::HashMap::with_capacity(seed_positions.len());
 
     if edges.is_empty() || num_nodes == 0 || seed_positions.is_empty() {
         return results;
@@ -1956,12 +2010,25 @@ pub fn batch_spread_activation(
         .collect();
     let csr = CSRAdjacency::build(&graph_edges, num_nodes);
 
+    // Bolt ⚡ Performance Optimization:
+    // Hoist scratch buffers outside the per-seed loop and reset state lazily in O(|R(s)|) time.
+    // Eliminates all per-seed heap allocations of size N during batch spreading activation.
+    let mut scratch = SpreadScratch::new(num_nodes);
+
     // Run spread activation per seed
     for &(seed_pos, seed_act) in seed_positions {
-        let result = compute_spread_activation(&csr, &[(seed_pos, seed_act)], |_u, _v| 1.0, decay, threshold, max_hops);
+        scratch.reset();
+        let result = compute_spread_activation_impl(
+            &csr,
+            &[(seed_pos, seed_act)],
+            |_u, _v| 1.0,
+            decay,
+            threshold,
+            max_hops,
+            &mut scratch,
+        );
 
         let mut activated = result.activated;
-        activated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         activated.truncate(k_per_seed);
 
         results.insert(seed_pos, activated);
