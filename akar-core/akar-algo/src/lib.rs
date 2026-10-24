@@ -1475,18 +1475,17 @@ pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
         }
         let slice = &mut flat_adj[start_len..];
         slice.sort_unstable();
-        let mut write = start_len;
-        let mut read = start_len;
-        while read < flat_adj.len() {
-            let val = flat_adj[read];
-            flat_adj[write] = val;
-            write += 1;
-            read += 1;
-            while read < flat_adj.len() && flat_adj[read] == val {
-                read += 1;
+        let len = slice.len();
+        if len > 0 {
+            let mut write = start_len + 1;
+            for read in (start_len + 1)..(start_len + len) {
+                if flat_adj[read] != flat_adj[write - 1] {
+                    flat_adj[write] = flat_adj[read];
+                    write += 1;
+                }
             }
+            flat_adj.truncate(write);
         }
-        flat_adj.truncate(write);
     }
     offsets.push(flat_adj.len());
 
@@ -1495,20 +1494,19 @@ pub fn compute_triangle_count(csr: &CSRAdjacency) -> AlgoResult {
         let v_end = offsets[v + 1];
         let v_adj = &flat_adj[v_start..v_end];
 
-        for &u in v_adj {
-            if u <= v {
-                continue;
-            }
+        // Partition point once per vertex v: slice of v's neighbors that are strictly greater than v
+        let v_upper_idx = v_adj.partition_point(|&x| x <= v);
+        let v_upper = &v_adj[v_upper_idx..];
 
+        for (pos, &u) in v_upper.iter().enumerate() {
             let u_start = offsets[u];
             let u_end = offsets[u + 1];
             let u_adj = &flat_adj[u_start..u_end];
 
-            // Sub-slice of v's neighbors > u
-            let v_sub_idx = v_adj.partition_point(|&x| x <= u);
-            let v_sub = &v_adj[v_sub_idx..];
+            // v_sub is v's neighbors strictly greater than u (starts right after u in v_upper)
+            let v_sub = &v_upper[pos + 1..];
 
-            // Sub-slice of u's neighbors > u
+            // u_sub is u's neighbors strictly greater than u
             let u_sub_idx = u_adj.partition_point(|&x| x <= u);
             let u_sub = &u_adj[u_sub_idx..];
 
