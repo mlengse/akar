@@ -954,11 +954,13 @@ impl Catalog {
     /// Check if a macro with the given name exists (case-insensitive).
     pub fn contains_macro(&self, name: &str) -> bool {
         let upper = name.to_uppercase();
-        self.name_to_id.contains_key(&upper)
-            && matches!(
-                self.entries.get(self.name_to_id.get(&upper).unwrap()),
-                Some(CatalogEntry::Macro(_))
-            )
+        let Some(&macro_id) = self.name_to_id.get(&upper) else {
+            return false;
+        };
+        matches!(
+            self.entries.get(&macro_id),
+            Some(CatalogEntry::Macro(_))
+        )
     }
 
     // ==================== Type alias & table comment methods (P84) ====================
@@ -1167,15 +1169,23 @@ impl Catalog {
         }
         drop(cols);
 
-        let entry = self.get_entry_by_name_mut(table_name).unwrap();
+        let Some(entry) = self.get_entry_by_name_mut(table_name) else {
+            return Err(CatalogError::NotFound(format!("Table '{table_name}' not found")));
+        };
         match entry {
             CatalogEntry::NodeTable(t) => {
-                let col = t.columns.iter_mut().find(|c| c.name == old_name).unwrap();
+                let col = t.columns.iter_mut().find(|c| c.name == old_name).ok_or_else(|| CatalogError::ColumnNotFound {
+                    table: table_name.to_string(),
+                    column: old_name.to_string(),
+                })?;
                 col.name = new_name.to_string();
                 Ok(())
             }
             CatalogEntry::RelTable(t) => {
-                let col = t.columns.iter_mut().find(|c| c.name == old_name).unwrap();
+                let col = t.columns.iter_mut().find(|c| c.name == old_name).ok_or_else(|| CatalogError::ColumnNotFound {
+                    table: table_name.to_string(),
+                    column: old_name.to_string(),
+                })?;
                 col.name = new_name.to_string();
                 Ok(())
             }
@@ -1446,7 +1456,9 @@ impl Catalog {
         if self.name_to_id.contains_key(&new_name) {
             return CatalogResult::AlreadyExists;
         }
-        let table_id = self.name_to_id.remove(old_name).unwrap();
+        let Some(table_id) = self.name_to_id.remove(old_name) else {
+            return CatalogResult::NotFound;
+        };
         self.name_to_id.insert(new_name.clone(), table_id);
 
         // Update the entry's name

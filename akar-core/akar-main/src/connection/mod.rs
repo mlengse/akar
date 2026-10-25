@@ -28,6 +28,7 @@ pub mod utils;
 use crate::database::Database;
 use crate::prepared_statement::PreparedStatement;
 use crate::query_result::QueryResult;
+use crate::storage_driver::StorageDriver;
 use akar_common::types::Value;
 use plan_cache::{CachedPlan, PlanCache};
 use std::collections::HashMap;
@@ -161,6 +162,12 @@ impl Connection {
     /// measure statements per batch.
     pub fn executed_statements(&self) -> u64 {
         self.executed_statements.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Access the storage driver for catalog-level operations (e.g. creating
+    /// vector indexes) that are not expressible as SQL DDL.
+    pub fn storage_driver(&self) -> StorageDriver {
+        self.database.storage_driver()
     }
 }
 

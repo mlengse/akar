@@ -439,7 +439,7 @@ impl Database {
                     if let Some(val) = table.get_value(row_id, col_idx) {
                         if let Ok(vec) = akar_storage::extract_f64_list_from_value(val) {
                             if let Some(mut vi) = table_catalog.get_vector_index_by_name_mut(&index_name) {
-                                vi.hnsw_mut().insert(vec, row_id);
+                                vi.hnsw_mut().insert(vec.into_iter().map(|f| f as f32).collect(), row_id);
                             }
                         }
                     }

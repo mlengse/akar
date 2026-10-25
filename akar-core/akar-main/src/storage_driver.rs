@@ -1,8 +1,11 @@
 use akar_catalog::Catalog;
 use akar_common::file_system::VirtualFileSystemRegistry;
-use akar_storage::{BufferInfo, FileInfo, FsmInfo, StorageInfo, StorageManager};
+use akar_storage::{BufferInfo, FileInfo, FsmInfo, StorageInfo, StorageManager, VectorIndexTable};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+#[cfg(feature = "vector-extension")]
+use akar_vector::hnsw::DistanceMetric;
 
 /// High-level storage access API.
 ///
@@ -113,5 +116,26 @@ impl StorageDriver {
     /// Number of pinned buffer frames.
     pub fn pinned_frames(&self) -> usize {
         self.buffer_info().num_pinned
+    }
+
+    /// Create a vector index in the catalog and register its file with the
+    /// BufferManager. Idempotent by name: if an index with the same name
+    /// already exists, this is a no-op (FR-012).
+    #[cfg(feature = "vector-extension")]
+    pub fn create_vector_index(
+        &self,
+        name: String,
+        table_name: String,
+        column_name: String,
+        metric: DistanceMetric,
+        dimensions: u32,
+    ) -> VectorIndexTable {
+        self.storage_manager.create_vector_index(
+            name.clone(),
+            table_name.clone(),
+            column_name.clone(),
+            metric,
+            dimensions,
+        )
     }
 }
