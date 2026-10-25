@@ -1,9 +1,11 @@
 use akar_catalog::Catalog;
 use akar_common::file_system::VirtualFileSystemRegistry;
-use akar_storage::{BufferInfo, FileInfo, FsmInfo, StorageInfo, StorageManager, VectorIndexTable};
+use akar_storage::{BufferInfo, FileInfo, FsmInfo, StorageInfo, StorageManager};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "vector-extension")]
+use akar_storage::VectorIndexTable;
 #[cfg(feature = "vector-extension")]
 use akar_vector::hnsw::DistanceMetric;
 

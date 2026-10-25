@@ -317,24 +317,7 @@ impl Connection {
     /// The values are substituted for `$name` references in the query before
     /// planning and execution.
     pub fn execute(&self, prepared: &PreparedStatement, params: Vec<(&str, Value)>) -> Result<QueryResult, String> {
-        // Build parameter map
-        let mut param_map = HashMap::new();
-        let num_expected = prepared.parameters.len();
-        for (name, value) in &params {
-            param_map.insert(name.to_string(), value.clone());
-        }
-
-        // Validate all parameters are provided
-        for p in &prepared.parameters {
-            if !param_map.contains_key(p) {
-                return Err(format!("Missing parameter: ${}", p));
-            }
-        }
-
-        // Check for unknown parameters
-        if params.len() > num_expected {
-            return Err(format!("Expected {} parameter(s), got {}", num_expected, params.len()));
-        }
+        let param_map = Self::build_param_map(prepared, params)?;
 
         // Read-only databases reject any write statement (DDL or DML).
         if self.database.config.read_only && Connection::is_write_statement(&prepared.bound_statement) {
@@ -500,6 +483,104 @@ impl Connection {
 
         // Auto-checkpoint after DML execution
         self.maybe_auto_checkpoint()?;
+
+        Ok(QueryResult::new(chunks))
+    }
+
+    /// Build and validate the parameter map for a prepared statement.
+    fn build_param_map(
+        prepared: &PreparedStatement,
+        params: Vec<(&str, Value)>,
+    ) -> Result<HashMap<String, Value>, String> {
+        let mut param_map = HashMap::new();
+        let num_expected = prepared.parameters.len();
+        for (name, value) in &params {
+            param_map.insert(name.to_string(), value.clone());
+        }
+
+        // Validate all parameters are provided
+        for p in &prepared.parameters {
+            if !param_map.contains_key(p) {
+                return Err(format!("Missing parameter: ${p}"));
+            }
+        }
+
+        // Check for unknown parameters
+        if params.len() > num_expected {
+            return Err(format!("Expected {num_expected} parameter(s), got {}", params.len()));
+        }
+        Ok(param_map)
+    }
+
+    /// Execute a prepared query statement inside a caller-owned transaction.
+    ///
+    /// [`Connection::execute`] begins and commits one transaction per
+    /// statement. A batch split across chunks cannot use it: each chunk would
+    /// commit on its own, so a failure in chunk *n* would leave chunks `0..n`
+    /// durably behind. This method joins `txn` instead, and the caller decides
+    /// when the whole batch commits or rolls back (`crate::bulk::insert_nodes`).
+    ///
+    /// Only planned query statements are supported (the `UNWIND … CREATE`
+    /// shape the bulk helpers generate). DDL is deliberately not routed here —
+    /// it bypasses `LocalStorage`/`ShadowFile` and could not be undone by the
+    /// caller's rollback.
+    pub(crate) fn execute_in_txn(
+        &self,
+        txn: &mut akar_transaction::Transaction,
+        prepared: &PreparedStatement,
+        params: Vec<(&str, Value)>,
+    ) -> Result<QueryResult, String> {
+        let param_map = Self::build_param_map(prepared, params)?;
+
+        // Read-only databases reject any write statement (DDL or DML).
+        if self.database.config.read_only && Connection::is_write_statement(&prepared.bound_statement) {
+            return Err("Database is in read-only mode; write statements are not allowed".into());
+        }
+
+        // Count the statement before execution so batch helpers can measure how
+        // many statements a batch is split into (P131).
+        self.executed_statements
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let substituted =
+            crate::connection::substitute::substitute_params_in_statement(&prepared.bound_statement, &param_map)?;
+
+        // Lock tables for DML writes only in single-writer mode; mirrors
+        // `execute_query_inner`. The lock belongs to the caller's txn, so the
+        // whole batch holds it until commit/rollback.
+        if !self.database.transaction_manager.allow_concurrent_writes() {
+            for tid in Connection::extract_write_tables(&substituted) {
+                self.database.transaction_manager.lock_table(txn.transaction_id, tid)?;
+            }
+        }
+
+        let optimized_plan = Arc::new(self.build_optimized_plan(&substituted)?);
+        if optimized_plan.is_empty() {
+            return Ok(QueryResult::success_message("Query executed (no result)".into()));
+        }
+
+        // Use the caller's snapshot so every chunk of the batch reads the same
+        // view of the database.
+        let (snapshot_ts, history) = (
+            txn.snapshot_ts,
+            self.database.transaction_manager.commit_history_snapshot(),
+        );
+        let processor = self
+            .create_processor()?
+            .with_snapshot(snapshot_ts, history)
+            .with_txn_id(Some(txn.transaction_id));
+        let chunks = processor.execute(&optimized_plan).map_err(|e| format!("Execute error: {e}"))?;
+
+        // Record row-level writes for OCC conflict detection.
+        let tm = &self.database.transaction_manager;
+        for (table_id, row_id) in processor.take_written_rows() {
+            tm.record_write(txn.transaction_id, table_id, row_id);
+        }
+
+        // Drain undo/typed WAL records into the caller's txn so a rollback
+        // reverts in-place writes and the WAL never sees an undone row.
+        txn.undo_records.extend(processor.take_undo_records());
+        self.append_local_wal(txn.transaction_id, processor.take_wal_records());
 
         Ok(QueryResult::new(chunks))
     }

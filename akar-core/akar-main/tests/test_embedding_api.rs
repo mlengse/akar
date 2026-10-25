@@ -112,6 +112,32 @@ fn typed_batch_insert_rejects_a_column_value_mismatch() -> Result<(), String> {
 }
 
 #[test]
+fn a_failing_chunk_rolls_back_the_whole_batch() -> Result<(), String> {
+    // FR-021/FR-022: the batch is request-level atomic. Row 200 already exists,
+    // so the second chunk (rows 101..=200) hits a duplicate primary key after
+    // the first chunk (rows 1..=100) has already been executed. The first
+    // chunk's rows must be discarded, not left behind.
+    let (_db, conn, _dir) = open();
+    insert_nodes(&conn, &[memory(200)], 10)?;
+
+    let rows: Vec<MemoryRow> = (1..=250).map(memory).collect();
+    let error = insert_nodes(&conn, &rows, 100).expect_err("a duplicate PK in a later chunk must fail the batch");
+    assert!(
+        error.to_lowercase().contains("duplicate primary key"),
+        "unexpected error: {error}"
+    );
+
+    let count = conn.query("MATCH (m:Memory) RETURN count(m) AS n")?;
+    let chunk = count.chunks.first().ok_or("no chunk")?;
+    assert_eq!(
+        chunk.get_value(0, 0),
+        Some(Value::Int64(1)),
+        "the first chunk must have been rolled back, leaving only the pre-existing row"
+    );
+    Ok(())
+}
+
+#[test]
 fn batched_edge_insert_is_idempotent_and_needs_both_endpoints() -> Result<(), String> {
     let (_db, conn, _dir) = open();
     insert_nodes(&conn, &[memory(1), memory(2), memory(3)], 10)?;

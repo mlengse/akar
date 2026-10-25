@@ -512,6 +512,41 @@ mod tests {
     }
 
     #[test]
+    fn test_legacy_f64_vector_index_fails_loudly_on_load() {
+        // FR-011: an index persisted at 64-bit precision must not be read as if
+        // it were f32. Loading it has to fail with rebuild guidance instead of
+        // returning silently degraded or empty results.
+        let dir = tempfile::tempdir().unwrap();
+        let mut bm = setup_bm(dir.path());
+
+        let mut idx = VectorIndexTable::new(
+            1,
+            "legacy_idx".into(),
+            "items".into(),
+            "embedding".into(),
+            DistanceMetric::Cosine,
+            3,
+        );
+        idx.register_file(&mut bm, dir.path());
+
+        let header = serialize_header(0, None, 0, 3, &DistanceMetric::Cosine, VectorPrecision::F64);
+        {
+            let frame = bm.pin_mut(&idx.file_name, 0).unwrap();
+            frame.data[..header.len()].copy_from_slice(&header);
+            frame.is_dirty = true;
+            bm.unpin(&idx.file_name, 0);
+        }
+
+        let error = idx.load(&mut bm).expect_err("a legacy f64 index must not load silently");
+        let message = error.to_string();
+        assert!(message.contains("64-bit"), "unexpected error: {message}");
+        assert!(
+            message.contains("DROP VECTOR INDEX"),
+            "rebuild guidance missing: {message}"
+        );
+    }
+
+    #[test]
     fn test_vector_index_save_errors_when_vector_too_large() {
         let dir = tempfile::tempdir().unwrap();
         let mut bm = setup_bm(dir.path());

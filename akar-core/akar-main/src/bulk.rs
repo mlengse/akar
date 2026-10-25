@@ -160,12 +160,15 @@ pub fn insert_nodes<T: TypedNode>(conn: &Connection, rows: &[T], rows_per_statem
     }
 
     let statement = create_nodes_statement::<T>();
+    let prepared = conn.prepare(&statement)?;
+    // One request-level transaction for the whole batch: every chunk joins it,
+    // so a rejected chunk rolls back the chunks already executed (FR-021/022).
     let mut txn = conn.begin_write_txn()?;
     let mut written = 0;
     let outcome: Result<usize, String> = (|| -> Result<usize, String> {
         for chunk in rows.chunks(rows_per_statement) {
             let payload = encode_chunk::<T>(chunk)?;
-            let query_result = conn.execute_params(&statement, vec![("rows", payload)])?;
+            let query_result = conn.execute_in_txn(&mut txn, &prepared, vec![("rows", payload)])?;
             written += written_count(&query_result)?;
         }
         Ok(written)
@@ -173,6 +176,12 @@ pub fn insert_nodes<T: TypedNode>(conn: &Connection, rows: &[T], rows_per_statem
     match outcome {
         Ok(w) => {
             conn.commit_write_txn(&mut txn)?;
+            // The rows became visible only at commit, so rebuild any vector
+            // index on the written tables once per batch (not once per chunk).
+            let written_tables = Connection::extract_write_tables(&prepared.bound_statement);
+            if !written_tables.is_empty() {
+                conn.database.refresh_vector_indexes(&written_tables);
+            }
             Ok(w)
         }
         Err(e) => {
