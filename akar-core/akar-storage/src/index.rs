@@ -30,6 +30,7 @@
 //! store a u64 hash instead and use the in-memory L1 for collision resolution.
 
 use crate::buffer_manager::BufferManager;
+use akar_common::error::{AkarError, StorageError};
 use hashbrown::HashMap;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
@@ -114,7 +115,7 @@ pub trait IndexKey: Clone + std::fmt::Debug {
     fn serialize_into(&self, buf: &mut [u8]);
 
     /// Deserialize a key from a byte slice (must be `key_size()` bytes).
-    fn deserialize_from(buf: &[u8]) -> Self;
+    fn deserialize_from(buf: &[u8]) -> Result<Self, AkarError>;
 }
 
 // Implement for the most common key type: String (variable-length → store hash)
@@ -132,12 +133,16 @@ impl IndexKey for String {
         buf.copy_from_slice(&h.to_le_bytes());
     }
 
-    fn deserialize_from(buf: &[u8]) -> Self {
+    fn deserialize_from(buf: &[u8]) -> Result<Self, AkarError> {
         // We can't recover the original string from a hash.
         // For String keys, the L1 cache is the canonical store.
         // The on-disk index is used only for persistence/recovery.
-        let h = u64::from_le_bytes(buf[..8].try_into().unwrap());
-        format!("__hash_{h}") // placeholder; real recovery uses L1 cache
+        let h = u64::from_le_bytes(
+            buf[..8]
+                .try_into()
+                .map_err(|e| AkarError::Storage(StorageError::Index(format!("bad hash key bytes: {e}"))))?,
+        );
+        Ok(format!("__hash_{h}")) // placeholder; real recovery uses L1 cache
     }
 }
 
@@ -150,8 +155,10 @@ impl IndexKey for u64 {
         buf.copy_from_slice(&self.to_le_bytes());
     }
 
-    fn deserialize_from(buf: &[u8]) -> Self {
-        u64::from_le_bytes(buf[..8].try_into().unwrap())
+    fn deserialize_from(buf: &[u8]) -> Result<Self, AkarError> {
+        Ok(u64::from_le_bytes(buf[..8].try_into().map_err(|e| {
+            AkarError::Storage(StorageError::Index(format!("bad u64 key bytes: {e}")))
+        })?))
     }
 }
 
@@ -164,8 +171,10 @@ impl IndexKey for i64 {
         buf.copy_from_slice(&self.to_le_bytes());
     }
 
-    fn deserialize_from(buf: &[u8]) -> Self {
-        i64::from_le_bytes(buf[..8].try_into().unwrap())
+    fn deserialize_from(buf: &[u8]) -> Result<Self, AkarError> {
+        Ok(i64::from_le_bytes(buf[..8].try_into().map_err(|e| {
+            AkarError::Storage(StorageError::Index(format!("bad i64 key bytes: {e}")))
+        })?))
     }
 }
 
@@ -178,8 +187,11 @@ impl IndexKey for u32 {
         buf.copy_from_slice(&self.to_le_bytes());
     }
 
-    fn deserialize_from(buf: &[u8]) -> Self {
-        u32::from_le_bytes(buf[..8].try_into().unwrap())
+    fn deserialize_from(buf: &[u8]) -> Result<Self, AkarError> {
+        let size = Self::key_size();
+        Ok(u32::from_le_bytes(buf[..size].try_into().map_err(|e| {
+            AkarError::Storage(StorageError::Index(format!("bad u32 key bytes: {e}")))
+        })?))
     }
 }
 
@@ -192,8 +204,11 @@ impl IndexKey for i32 {
         buf.copy_from_slice(&self.to_le_bytes());
     }
 
-    fn deserialize_from(buf: &[u8]) -> Self {
-        i32::from_le_bytes(buf[..8].try_into().unwrap())
+    fn deserialize_from(buf: &[u8]) -> Result<Self, AkarError> {
+        let size = Self::key_size();
+        Ok(i32::from_le_bytes(buf[..size].try_into().map_err(|e| {
+            AkarError::Storage(StorageError::Index(format!("bad i32 key bytes: {e}")))
+        })?))
     }
 }
 
@@ -260,9 +275,21 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
             let frame = bm.pin(&self.file_name, page_num)?;
             let data = &frame.data;
 
-            let num_slots = u32::from_le_bytes(data[0..4].try_into().unwrap());
-            let num_entries = u32::from_le_bytes(data[4..8].try_into().unwrap());
-            let _collision_next = u32::from_le_bytes(data[8..12].try_into().unwrap());
+            let num_slots = u32::from_le_bytes(
+                data[0..4]
+                    .try_into()
+                    .map_err(|e| std::io::Error::other(format!("bad page header num_slots: {e}")))?,
+            );
+            let num_entries = u32::from_le_bytes(
+                data[4..8]
+                    .try_into()
+                    .map_err(|e| std::io::Error::other(format!("bad page header num_entries: {e}")))?,
+            );
+            let _collision_next = u32::from_le_bytes(
+                data[8..12]
+                    .try_into()
+                    .map_err(|e| std::io::Error::other(format!("bad page header collision_next: {e}")))?,
+            );
 
             if num_entries == 0 {
                 bm.unpin(&self.file_name, page_num);
@@ -287,7 +314,7 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
                 let value = u64::from_le_bytes(
                     data[offset + self.key_size..offset + self.key_size + 8]
                         .try_into()
-                        .unwrap(),
+                        .map_err(|e| std::io::Error::other(format!("bad slot value bytes: {e}")))?,
                 );
 
                 // For fixed-size keys, we can deserialize directly.
@@ -295,7 +322,7 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
                 // rebuild_from_disk is only used at startup when L1 is empty.
                 // The L1 entries will be re-inserted during WAL replay.
                 if self.key_size <= 8 {
-                    let key = K::deserialize_from(&key_buf);
+                    let key = K::deserialize_from(&key_buf).map_err(|e| std::io::Error::other(e.to_string()))?;
                     self.cache.insert(key, value);
                 }
             }
@@ -367,9 +394,21 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
         let frame = bm.pin(&self.file_name, page_num)?;
         let data = &frame.data;
 
-        let _num_slots = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let mut num_entries = u32::from_le_bytes(data[4..8].try_into().unwrap());
-        let mut collision_next = u32::from_le_bytes(data[8..12].try_into().unwrap());
+        let _num_slots = u32::from_le_bytes(
+            data[0..4]
+                .try_into()
+                .map_err(|e| std::io::Error::other(format!("bad page header num_slots: {e}")))?,
+        );
+        let mut num_entries = u32::from_le_bytes(
+            data[4..8]
+                .try_into()
+                .map_err(|e| std::io::Error::other(format!("bad page header num_entries: {e}")))?,
+        );
+        let mut collision_next = u32::from_le_bytes(
+            data[8..12]
+                .try_into()
+                .map_err(|e| std::io::Error::other(format!("bad page header collision_next: {e}")))?,
+        );
 
         let mut result = None;
         let mut current_page = page_num;
@@ -383,7 +422,11 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
             let page_frame = bm.pin(&self.file_name, current_page)?;
             let page_data = &page_frame.data;
 
-            let nslots = u32::from_le_bytes(page_data[0..4].try_into().unwrap());
+            let nslots = u32::from_le_bytes(
+                page_data[0..4]
+                    .try_into()
+                    .map_err(|e| std::io::Error::other(format!("bad page header nslots: {e}")))?,
+            );
             for slot_idx in 0..nslots as usize {
                 let offset = PAGE_HEADER_SIZE + slot_idx * self.slot_size;
                 if offset + self.slot_size > page_data.len() {
@@ -395,13 +438,15 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
                 }
 
                 key_buf.copy_from_slice(&page_data[offset..offset + self.key_size]);
-                let candidate = K::deserialize_from(&key_buf);
+                let Ok(candidate) = K::deserialize_from(&key_buf) else {
+                    continue;
+                };
 
                 if &candidate == key {
                     let value = u64::from_le_bytes(
                         page_data[offset + self.key_size..offset + self.key_size + 8]
                             .try_into()
-                            .unwrap(),
+                            .map_err(|e| std::io::Error::other(format!("bad slot value bytes: {e}")))?,
                     );
                     result = Some(value);
                     bm.unpin(&self.file_name, current_page);
@@ -531,7 +576,11 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
                 data[slot_offset + self.key_size + 8] = FLAG_OCCUPIED;
 
                 // Update num_entries in header
-                let current = u32::from_le_bytes(data[4..8].try_into().unwrap());
+                let current = u32::from_le_bytes(
+                    data[4..8]
+                        .try_into()
+                        .map_err(|e| std::io::Error::other(format!("bad num_entries bytes: {e}")))?,
+                );
                 data[4..8].copy_from_slice(&(current + 1).to_le_bytes());
             }
 

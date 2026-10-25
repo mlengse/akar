@@ -401,8 +401,12 @@ impl HnswIndex {
                 // Minimum distance from this candidate to any already-selected neighbor.
                 let mut min_neighbor_dist = f32::INFINITY;
                 for &sel_id in &selected {
-                    let sel_node = self.nodes.get(&sel_id).expect("selected node exists");
-                    let cand_node = self.nodes.get(&cand_id).expect("candidate node exists");
+                    let Some(sel_node) = self.nodes.get(&sel_id) else {
+                        break;
+                    };
+                    let Some(cand_node) = self.nodes.get(&cand_id) else {
+                        break;
+                    };
                     let d = self.metric.compute(&cand_node.vector, &sel_node.vector);
                     if d < min_neighbor_dist {
                         min_neighbor_dist = d;
@@ -449,7 +453,10 @@ impl HnswIndex {
             return;
         }
 
-        let entry = self.entry_point.unwrap();
+        let entry = match self.entry_point {
+            Some(e) => e,
+            None => return,
+        };
 
         // Phase 1: Traverse from top level down to `new_level + 1`
         // to find the best entry point at `new_level`.
@@ -567,11 +574,12 @@ impl HnswIndex {
     /// Returns an empty vec when the index is empty, when `k == 0`, or when
     /// `ef == 0`.
     pub fn search_with_ef(&self, query: &[f32], k: usize, ef: usize) -> Vec<(f32, usize)> {
-        if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 || ef == 0 {
+        if self.nodes.is_empty() || k == 0 || ef == 0 {
             return Vec::new();
         }
-
-        let entry = self.entry_point.unwrap();
+        let Some(entry) = self.entry_point else {
+            return Vec::new();
+        };
 
         // Phase 1: Greedy descent from top level to level 1
         let mut current = entry;
@@ -601,11 +609,12 @@ impl HnswIndex {
         ef: usize,
         filter: impl Fn(usize) -> bool,
     ) -> Vec<(f32, usize)> {
-        if self.nodes.is_empty() || self.entry_point.is_none() || k == 0 || ef == 0 {
+        if self.nodes.is_empty() || k == 0 || ef == 0 {
             return Vec::new();
         }
-
-        let entry = self.entry_point.unwrap();
+        let Some(entry) = self.entry_point else {
+            return Vec::new();
+        };
 
         // Phase 1: Greedy descent from top level to level 1.
         // The entry point descent does NOT apply the filter — it's just a
