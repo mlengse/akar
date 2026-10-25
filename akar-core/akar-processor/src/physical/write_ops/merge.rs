@@ -2,6 +2,7 @@
 
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::set::{PhysicalSet, append_pipeline_columns};
+use akar_common::error::StorageError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
@@ -117,16 +118,12 @@ impl PhysicalOperatorExec for PhysicalMerge {
                     }
                 }
 
-                // Match against the existing table. Without a PK property, fall
-                // back to a full scan over the first pattern property (Cypher
-                // MERGE on non-PK fields has no O(1) lookup without a secondary
-                // index).
+                // Match against the existing table. Uses the hash index for O(1)
+                // PK lookup (works without an ART index). Without a PK property,
+                // fall back to a full scan over the first pattern property.
                 let mut matched: Option<u64> = None;
                 if let Some(val) = &pk_val {
-                    let row_ids = table_info.lookup_by_pk_range(Some(val), true, Some(val), true, 1);
-                    if !row_ids.is_empty() {
-                        matched = Some(row_ids[0]);
-                    }
+                    matched = table_info.lookup_by_pk(val);
                 } else if let Some((prop_name, expr)) = self.properties.first() {
                     let first_val = eval_const(expr, Some(chunk), row);
                     if let Some(prop_col) = table_info.columns.iter().position(|c| &c.name == prop_name) {
@@ -148,44 +145,93 @@ impl PhysicalOperatorExec for PhysicalMerge {
                     merged_row_ids.push(row_id);
                     source_rows.push((ci, row));
                 } else {
-                    let table_info = self
-                        .table_catalog
-                        .get_node_table_by_name(&self.table_name)
-                        .ok_or_else(|| format!("Table '{}' not found", self.table_name))?;
-                    let mut new_values: Vec<Value> = Vec::new();
-                    for col_idx in 0..num_cols {
-                        let col_name = &table_info.columns[col_idx].name;
-                        if let Some((_, expr)) = self.properties.iter().find(|(n, _)| n == col_name) {
-                            new_values.push(eval_const(expr, Some(chunk), row));
-                        } else if table_info.columns[col_idx].is_primary_key {
-                            return Err(format!("MERGE CREATE requires primary key '{}'", col_name).into());
-                        } else {
-                            new_values.push(Value::Null);
+                    // Retry loop for concurrent MERGE upsert safety (FR-015).
+                    // When a concurrent transaction inserts the same PK first, we
+                    // get a duplicate-key error; we re-match via the hash index
+                    // (lookup_by_pk now finds the existing row) and take the ON
+                    // MATCH path instead of failing.
+                    let mut retries = 0u32;
+                    loop {
+                        let table_info = self
+                            .table_catalog
+                            .get_node_table_by_name(&self.table_name)
+                            .ok_or_else(|| format!("Table '{}' not found", self.table_name))?;
+                        let mut new_values: Vec<Value> = Vec::new();
+                        for col_idx in 0..num_cols {
+                            let col_name = &table_info.columns[col_idx].name;
+                            if let Some((_, expr)) = self.properties.iter().find(|(n, _)| n == col_name) {
+                                new_values.push(eval_const(expr, Some(chunk), row));
+                            } else if table_info.columns[col_idx].is_primary_key {
+                                return Err(format!("MERGE CREATE requires primary key '{}'", col_name).into());
+                            } else {
+                                new_values.push(Value::Null);
+                            }
                         }
-                    }
-                    drop(table_info);
+                        drop(table_info);
 
-                    if let Some(mut tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
-                        let logged_row = self.wal_sink.is_some().then(|| new_values.clone());
-                        let secondary_keys = self.table_catalog.secondary_index_keys_for_columns(
-                            &self.table_name,
-                            &tbl.columns,
-                            &new_values,
-                        );
-                        let row_id = tbl
-                            .insert_row_with_txn(new_values, self.txn_id)
-                            .map_err(|e| format!("MERGE CREATE failed: {e}"))?;
-                        self.table_catalog.apply_secondary_index_keys(secondary_keys, row_id);
-                        log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
-                        if let Some(sink) = self.undo_sink.as_ref()
-                            && let Ok(mut u) = sink.lock()
-                        {
-                            u.push(UndoRecord::insert(self.table_id, row_id));
+                        let insert_result = {
+                            if let Some(mut tbl) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+                                let logged_row = self.wal_sink.is_some().then(|| new_values.clone());
+                                let secondary_keys = self.table_catalog.secondary_index_keys_for_columns(
+                                    &self.table_name,
+                                    &tbl.columns,
+                                    &new_values,
+                                );
+                                tbl.insert_row_with_txn(new_values, self.txn_id)
+                                    .map(|row_id| (row_id, secondary_keys, logged_row))
+                            } else {
+                                return Err(format!("Table '{}' not found for MERGE CREATE", self.table_name).into());
+                            }
+                        };
+                        match insert_result {
+                            Ok((row_id, secondary_keys, logged_row)) => {
+                                self.table_catalog.apply_secondary_index_keys(secondary_keys, row_id);
+                                log_insert_record(&self.wal_sink, self.table_id, logged_row.as_deref().unwrap_or(&[]));
+                                if let Some(sink) = self.undo_sink.as_ref()
+                                    && let Ok(mut u) = sink.lock()
+                                {
+                                    u.push(UndoRecord::insert(self.table_id, row_id));
+                                }
+                                created_ids.push(row_id);
+                                created_src.push((ci, row));
+                                merged_row_ids.push(row_id);
+                                source_rows.push((ci, row));
+                                break;
+                            }
+                            Err(e) => {
+                                if let StorageError::Index(msg) = &e
+                                    && msg.contains("Duplicate primary key")
+                                    && retries < 3
+                                {
+                                    retries += 1;
+                                    // Node was created by a concurrent transaction — re-match
+                                    // via a full scan on the PK column and take ON MATCH path.
+                                    if let Some(pk) = pk_val.as_ref()
+                                        && let Some(tbl2) = self.table_catalog.get_node_table_by_name(&self.table_name)
+                                    {
+                                        let pk_col = tbl2.primary_key_column;
+                                        let mut found = None;
+                                        for row_idx in 0..tbl2.num_rows as usize {
+                                            if let Some(val) = tbl2.get_value(row_idx, pk_col)
+                                                && val == pk
+                                            {
+                                                found = Some(row_idx as u64);
+                                                break;
+                                            }
+                                        }
+                                        if let Some(row_id) = found {
+                                            matched_ids.push(row_id);
+                                            matched_src.push((ci, row));
+                                            merged_row_ids.push(row_id);
+                                            source_rows.push((ci, row));
+                                            break;
+                                        }
+                                    }
+                                    continue;
+                                }
+                                return Err(format!("MERGE CREATE failed: {e}").into());
+                            }
                         }
-                        created_ids.push(row_id);
-                        created_src.push((ci, row));
-                        merged_row_ids.push(row_id);
-                        source_rows.push((ci, row));
                     }
                 }
             }
