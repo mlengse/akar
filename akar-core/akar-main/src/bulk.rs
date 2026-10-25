@@ -160,13 +160,26 @@ pub fn insert_nodes<T: TypedNode>(conn: &Connection, rows: &[T], rows_per_statem
     }
 
     let statement = create_nodes_statement::<T>();
+    let mut txn = conn.begin_write_txn()?;
     let mut written = 0;
-    for chunk in rows.chunks(rows_per_statement) {
-        let payload = encode_chunk::<T>(chunk)?;
-        let result = conn.execute_params(&statement, vec![("rows", payload)])?;
-        written += written_count(&result)?;
+    let outcome: Result<usize, String> = (|| -> Result<usize, String> {
+        for chunk in rows.chunks(rows_per_statement) {
+            let payload = encode_chunk::<T>(chunk)?;
+            let query_result = conn.execute_params(&statement, vec![("rows", payload)])?;
+            written += written_count(&query_result)?;
+        }
+        Ok(written)
+    })();
+    match outcome {
+        Ok(w) => {
+            conn.commit_write_txn(&mut txn)?;
+            Ok(w)
+        }
+        Err(e) => {
+            let _ = conn.rollback_write_txn(&mut txn);
+            Err(e)
+        }
     }
-    Ok(written)
 }
 
 /// Write `edges` into `rel.table` using one batched `UNWIND` statement per chunk.

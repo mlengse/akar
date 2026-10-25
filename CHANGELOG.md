@@ -18,6 +18,8 @@
 - **Typed multi-edge relationships (feature 021, FR-013–FR-017)** · gate `cargo test -p akar-main --test test_typed_edges` **6 passed / 0 failed**
   - The batched edge writer (`akar-main/src/bulk.rs`) now includes `type` in the `MERGE` identity, so `similar` and `contradicts` coexist on one pair (FR-013) while re-writing a type updates in place (FR-014). `created_at` is create-once via `coalesce`, so a rewrite does not reset the original timestamp.
 
+- **Vector index benchmark record (FR-008–FR-010, SC-002–SC-004):** the HNSW vector index stores f32 vectors (~50% resident memory vs a 64-bit f64 baseline, SC-004, by f32 storage design). Per `sulur/CHANGELOG.md` `[Unreleased]` (T035/T036 re-measurement, 768-d `HashingEmbedder` corpus), HNSW top-10 overlap vs exhaustive search is flat at **0.489 @6k** and **0.084 @10k** across pool sizes — below the ≥0.90 bar (FR-008/SC-002, net-loss recorded there). Because ANN does not converge on this corpus, production recall remains the bounded scan; the `<15 ms` p95 recall latency (FR-009/SC-003) is therefore not achieved via ANN in this release. Beam-width tuning (`ef`) widens the candidate set but does not close the overlap gap on the tight-similarity-cone corpus.
+
 ## [0.3.2] - 2026-10-24
 
 - **feat(storage) - Feature 020 / T006–T020: secondary index + dedup write path (2026-10-23)** · gate `test [akar-core]` **368 passed / 0 failed** (akar-storage) + **187 passed / 0 failed** (akar-processor) · `cargo check --workspace` clean · `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean
