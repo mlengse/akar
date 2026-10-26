@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "akar-binder"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "akar-catalog"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-common",
  "hashbrown 0.17.1",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "akar-common"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "arrow",
  "flate2",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "akar-extension"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "akar-fts"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-common",
  "akar-extension",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "akar-function"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-common",
  "arrow",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "akar-main"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "akar-optimizer"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-binder",
  "akar-common",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "akar-parser"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "pest",
  "pest_derive",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "akar-planner"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-binder",
  "akar-catalog",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "akar-processor"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "ahash",
  "akar-catalog",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "akar-storage"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-catalog",
  "akar-common",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "akar-transaction"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "akar-common",
  "tracing",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "akar-vector"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "ahash",
  "akar-common",
@@ -551,9 +551,9 @@ dependencies = [
 
 [[package]]
 name = "brotli"
-version = "9.0.0"
+version = "9.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8b851b75c23ca7873623d612fe49bd1989aeb03d08fb9432187eb253d3d4c6b"
+checksum = "6737ce8b81460bf9407909f73ff50bf13f7cb8577e1e76715f57ed0eba58ba44"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -562,9 +562,9 @@ dependencies = [
 
 [[package]]
 name = "brotli-decompressor"
-version = "6.0.1"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "941cd9bd4ddab83cb46fa5a2d428f1c857b24ac78cb876cf7beb710840934bd7"
+checksum = "34c6783f42c21c952ad7112b354f0ba2f10760e9decea5b1b60523d6e270faaf"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -864,9 +864,9 @@ checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "erased-serde"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2add8a07dd6a8d93ff627029c51de145e12686fbc36ecb298ac22e74cf02dec"
+checksum = "1e59b668157f32d3459d4bd634861a06ffa2503a461ca5f0916b9f0252605e66"
 dependencies = [
  "serde",
  "serde_core",
@@ -1453,21 +1453,20 @@ dependencies = [
 
 [[package]]
 name = "pest"
-version = "2.9.4"
+version = "2.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd47a460a9cbc3b3429c7e22bf0d76653e779319bae45a499ca010c9a990bb23"
+checksum = "a8db75153506001cb36ed924f08cadc862eb3f8c4d0d534139f29074769d7660"
 dependencies = [
  "memchr",
- "psm",
- "stacker",
+ "pest_stack_guard",
  "ucd-trie",
 ]
 
 [[package]]
 name = "pest_derive"
-version = "2.9.4"
+version = "2.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "203e46697708f7519ab1608393cf89239cafb46b8e6d08a8ffe359359b11ef44"
+checksum = "20aa17e11fb35664b67d5214a0afac57a360d231b6ec53d6eba0700b27d933b4"
 dependencies = [
  "pest",
  "pest_generator",
@@ -1475,9 +1474,9 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.9.4"
+version = "2.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e84ae6340a458d3d6cfc73cf328cf3cfe90b2484cd0de25eb66aa954615ed4d5"
+checksum = "626ec5afccf44ccbfeb2b232316510bb55b4bf34d891afcb0fb07d2b17d7fe9d"
 dependencies = [
  "pest",
  "pest_meta",
@@ -1488,11 +1487,21 @@ dependencies = [
 
 [[package]]
 name = "pest_meta"
-version = "2.9.4"
+version = "2.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b57f92f32b3dbce6598fd8f5cdf1f06a6072570b8103fa21728fa9036923e710"
+checksum = "b3f45b6caa65c1b08186832745159c2529994146340a7bf44168095469720f5d"
 dependencies = [
  "pest",
+]
+
+[[package]]
+name = "pest_stack_guard"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97e6cd2217057fa86b6eaa512917e58089d875b957a31e35e7ab729977e0a5f2"
+dependencies = [
+ "psm",
+ "stacker",
 ]
 
 [[package]]
@@ -1756,9 +1765,9 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "sketches-ddsketch"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "513c3f5f732bfd6fbb187619c2dfe9d2f25f1a2976f01d575f0fd329d565df56"
+checksum = "e53e2f8d4e9c692f23a90208fad6a64862f413e286d533f1f649f160e2d5caee"
 dependencies = [
  "serde",
 ]

@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-27
+
 ### Added
 
 - **Secondary indexes are now end-to-end usable (feature 021, FR-001–FR-006)** · gate `cargo test -p akar-main --test test_secondary_index` **8 passed / 0 failed** · `cargo test -p akar-catalog -p akar-storage -p akar-planner` **375 passed / 0 failed** · `python tools/doc-check.py --root akar` PASS
@@ -922,6 +924,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.3.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.3
 [0.3.2]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.2
 [0.3.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.0
 [0.2.5]: https://github.com/mlengse/akar/compare/v0.1.2...v0.2.5
