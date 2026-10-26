@@ -2101,7 +2101,20 @@ mod tests {
         match result {
             Ok(provider) => {
                 assert_eq!(provider.model_name(), "BGESmallENV15");
-                assert!(provider.dimensions() > 0);
+                assert_eq!(provider.dimensions(), 384);
+            }
+            Err(EmbeddingError::InitFailed(_)) => {}
+            Err(e) => panic!("Unexpected error: {e}"),
+        }
+    }
+
+    #[test]
+    fn test_fast_embed_provider_try_default() {
+        let result = FastEmbedProvider::try_default();
+        match result {
+            Ok(provider) => {
+                assert_eq!(provider.model_name(), "BGESmallENV15");
+                assert_eq!(provider.dimensions(), 384);
             }
             Err(EmbeddingError::InitFailed(_)) => {}
             Err(e) => panic!("Unexpected error: {e}"),
