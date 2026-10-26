@@ -127,3 +127,7 @@
 ## 2026-10-25 - Single-partition slice windowing in triangle count neighbor intersection
 **Learning:** In triangle counting (`compute_triangle_count`), calling `partition_point` per neighbor `u` of `v` to isolate $w > u$ neighbors caused redundant $O(\log \text{deg}(v))$ binary searches in the inner loop. Partitioning `v_adj` once per vertex `v` for $x > v$ (`v_upper`) and taking $O(1)$ sub-slices `&v_upper[pos + 1..]` for $v_{\text{sub}}$ eliminates binary search operations inside the inner loop and provides an ~10.4% - 10.7% speedup on graph triangle counting.
 **Action:** Partition sorted neighbor lists once per vertex `v` for $x > v$ and slice `&v_upper[pos + 1..]` directly for $w > u > v$ canonical neighbor intersections.
+
+## 2026-10-26 - Rejection sampling limit caching in SimpleRng
+**Learning:** In pseudo-random range sampling (`gen_range`), calculating the rejection limit `n - (n % bound)` performs a 64-bit division/modulo operation. When sampling from bounds that repeat sequentially millions of times (e.g. random walk steps or negative candidate sampling), caching `last_bound` and `last_limit` inside `SimpleRng` avoids redundant 64-bit modulo calculations, providing a ~5.5% performance improvement in Node2Vec graph embedding benchmark.
+**Action:** Cache the rejection limit for repeated range bound queries in custom pseudo-random number generator structs to eliminate redundant 64-bit division/modulo operations.

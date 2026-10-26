@@ -2,11 +2,17 @@
 
 pub(super) struct SimpleRng {
     state: u64,
+    last_bound: usize,
+    last_limit: u64,
 }
 
 impl SimpleRng {
     pub(super) fn new(seed: u64) -> Self {
-        Self { state: seed }
+        Self {
+            state: seed,
+            last_bound: 0,
+            last_limit: 0,
+        }
     }
 
     fn next_u32(&mut self) -> u32 {
@@ -18,16 +24,26 @@ impl SimpleRng {
     /// of the naive `next_u32() % bound`.
     pub(super) fn gen_range(&mut self, bound: usize) -> usize {
         assert!(bound > 0, "gen_range bound must be > 0");
-        let bound = u32::try_from(bound).unwrap_or(u32::MAX);
-        if bound == 1 {
+        let bound_u32 = u32::try_from(bound).unwrap_or(u32::MAX);
+        if bound_u32 == 1 {
             return 0;
         }
-        let n = 1_u64 << 32;
-        let limit = n - (n % u64::from(bound));
+        // Bolt ⚡ Performance Optimization:
+        // Caching `last_bound` and `last_limit` avoids repeating 64-bit division/modulo (`n % bound`)
+        // during millions of sequential calls with identical bounds (e.g., negative sampling or walk steps).
+        let limit = if bound == self.last_bound {
+            self.last_limit
+        } else {
+            let n = 1_u64 << 32;
+            let l = n - (n % u64::from(bound_u32));
+            self.last_bound = bound;
+            self.last_limit = l;
+            l
+        };
         loop {
             let x = u64::from(self.next_u32());
             if x < limit {
-                return (x % u64::from(bound)) as usize;
+                return (x % u64::from(bound_u32)) as usize;
             }
         }
     }
