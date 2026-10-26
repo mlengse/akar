@@ -53,13 +53,20 @@ pub struct NativeBm25Index {
 /// Lowercase + split on non-alphanumeric characters. A lightweight tokenizer
 /// suitable for the native path (fuzzy tokenization parity with Tantivy is
 /// the job of `akar-fts`, not the fused path).
-// Bolt Optimization: Pre-allocate initial token String buffer with capacity and
-// use `std::mem::replace` to avoid resetting to 0 capacity and reallocating on every word.
+// Bolt Optimization: Fast-path ASCII alphanumeric characters (`ch.is_ascii()`) to push
+// `ch.to_ascii_lowercase()` directly into `current`, avoiding per-character `ToLowerCase`
+// iterator creation on common text inputs.
 pub fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::with_capacity(16);
     for ch in text.chars() {
-        if ch.is_alphanumeric() {
+        if ch.is_ascii() {
+            if ch.is_ascii_alphanumeric() {
+                current.push(ch.to_ascii_lowercase());
+            } else if !current.is_empty() {
+                tokens.push(std::mem::replace(&mut current, String::with_capacity(16)));
+            }
+        } else if ch.is_alphanumeric() {
             for lower in ch.to_lowercase() {
                 current.push(lower);
             }
@@ -80,25 +87,33 @@ impl NativeBm25Index {
     }
 
     /// Add a pre-tokenized document.
-    // Bolt Optimization: Use `hashbrown::HashMap` for AHash fast lookup and store
-    // `doc_len` directly in posting entries `(tf, doc_len as u32)` to eliminate
-    // per-posting hash table lookups during BM25 document scoring.
+    // Bolt Optimization: Borrow token string references (`HashMap<&str, u32>`) during local term
+    // frequency calculation and use `self.terms.get_mut(term)` to update existing term postings.
+    // This eliminates transient `String` heap allocations per token when building the BM25 inverted index.
     pub fn add_document(&mut self, id: u64, tokens: &[String]) {
-        let mut local: HashMap<String, u32> = HashMap::new();
+        let mut local: HashMap<&str, u32> = HashMap::new();
         for t in tokens {
-            *local.entry(t.clone()).or_insert(0) += 1;
+            *local.entry(t.as_str()).or_insert(0) += 1;
         }
         let doc_len = tokens.len();
         let doc_len_u32 = doc_len as u32;
         for (term, tf) in local {
-            let entry = self.terms.entry(term).or_insert_with(|| TermIndex {
-                df: 0,
-                postings: Postings::new(),
-            });
-            if !entry.postings.contains_key(&id) {
-                entry.df += 1;
+            if let Some(entry) = self.terms.get_mut(term) {
+                if !entry.postings.contains_key(&id) {
+                    entry.df += 1;
+                }
+                entry.postings.insert(id, (tf, doc_len_u32));
+            } else {
+                let mut postings = Postings::new();
+                postings.insert(id, (tf, doc_len_u32));
+                self.terms.insert(
+                    term.to_string(),
+                    TermIndex {
+                        df: 1,
+                        postings,
+                    },
+                );
             }
-            entry.postings.insert(id, (tf, doc_len_u32));
         }
         self.total_tokens += doc_len as u64;
         self.doc_lens.insert(id, doc_len);
