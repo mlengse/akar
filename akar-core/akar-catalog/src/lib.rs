@@ -957,10 +957,7 @@ impl Catalog {
         let Some(&macro_id) = self.name_to_id.get(&upper) else {
             return false;
         };
-        matches!(
-            self.entries.get(&macro_id),
-            Some(CatalogEntry::Macro(_))
-        )
+        matches!(self.entries.get(&macro_id), Some(CatalogEntry::Macro(_)))
     }
 
     // ==================== Type alias & table comment methods (P84) ====================
@@ -1174,18 +1171,26 @@ impl Catalog {
         };
         match entry {
             CatalogEntry::NodeTable(t) => {
-                let col = t.columns.iter_mut().find(|c| c.name == old_name).ok_or_else(|| CatalogError::ColumnNotFound {
-                    table: table_name.to_string(),
-                    column: old_name.to_string(),
-                })?;
+                let col =
+                    t.columns
+                        .iter_mut()
+                        .find(|c| c.name == old_name)
+                        .ok_or_else(|| CatalogError::ColumnNotFound {
+                            table: table_name.to_string(),
+                            column: old_name.to_string(),
+                        })?;
                 col.name = new_name.to_string();
                 Ok(())
             }
             CatalogEntry::RelTable(t) => {
-                let col = t.columns.iter_mut().find(|c| c.name == old_name).ok_or_else(|| CatalogError::ColumnNotFound {
-                    table: table_name.to_string(),
-                    column: old_name.to_string(),
-                })?;
+                let col =
+                    t.columns
+                        .iter_mut()
+                        .find(|c| c.name == old_name)
+                        .ok_or_else(|| CatalogError::ColumnNotFound {
+                            table: table_name.to_string(),
+                            column: old_name.to_string(),
+                        })?;
                 col.name = new_name.to_string();
                 Ok(())
             }

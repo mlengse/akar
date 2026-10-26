@@ -98,7 +98,9 @@ impl TreeOptimizationPass for CardinalityEstimation {
         LogicalOperator::visit_bottom_up(root, &mut |op| {
             let card = match op {
                 LogicalOperator::ArtIndexRangeScan(s) => s.cardinality,
-                LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) | LogicalOperator::IndexScan(_) => self.estimate_scan_node(op),
+                LogicalOperator::ScanNode(_) | LogicalOperator::ScanRel(_) | LogicalOperator::IndexScan(_) => {
+                    self.estimate_scan_node(op)
+                }
                 LogicalOperator::Filter(f) => {
                     let child_card = f.children.first().map(|c| c.cardinality()).unwrap_or(1);
                     // Conservative filter selectivity estimate

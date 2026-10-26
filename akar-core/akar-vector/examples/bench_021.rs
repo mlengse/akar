@@ -39,10 +39,7 @@ fn ms(duration: Duration) -> f64 {
 
 fn overlap(approx: &[(f32, usize)], exact: &[(f32, usize)]) -> f64 {
     let exact_ids: Vec<usize> = exact.iter().map(|(_, id)| *id).collect();
-    let hits = approx
-        .iter()
-        .filter(|(_, id)| exact_ids.contains(id))
-        .count();
+    let hits = approx.iter().filter(|(_, id)| exact_ids.contains(id)).count();
     hits as f64 / K as f64
 }
 

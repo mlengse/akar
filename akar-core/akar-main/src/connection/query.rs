@@ -569,7 +569,9 @@ impl Connection {
             .create_processor()?
             .with_snapshot(snapshot_ts, history)
             .with_txn_id(Some(txn.transaction_id));
-        let chunks = processor.execute(&optimized_plan).map_err(|e| format!("Execute error: {e}"))?;
+        let chunks = processor
+            .execute(&optimized_plan)
+            .map_err(|e| format!("Execute error: {e}"))?;
 
         // Record row-level writes for OCC conflict detection.
         let tm = &self.database.transaction_manager;

@@ -191,7 +191,11 @@ mod tests {
     }
 
     fn cosine(col: &str, q: &[f32]) -> Expression {
-        let list = Expression::List(q.iter().map(|v| Expression::Constant(Constant::Float(*v as f64))).collect());
+        let list = Expression::List(
+            q.iter()
+                .map(|v| Expression::Constant(Constant::Float(*v as f64)))
+                .collect(),
+        );
         Expression::FunctionCall("cosine_similarity".into(), vec![prop(col), list])
     }
 

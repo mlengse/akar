@@ -304,7 +304,8 @@ impl VectorIndexTable {
                  (DROP VECTOR INDEX {name}; then CREATE VECTOR INDEX {name} IF NOT EXISTS ...) \
                  so it is rebuilt at 32-bit precision, or re-run the ingestion path that builds \
                  the index from stored embeddings.",
-                self.name, name = self.name
+                self.name,
+                name = self.name
             )));
         }
         bm.unpin(&self.file_name, 0);
@@ -537,7 +538,9 @@ mod tests {
             bm.unpin(&idx.file_name, 0);
         }
 
-        let error = idx.load(&mut bm).expect_err("a legacy f64 index must not load silently");
+        let error = idx
+            .load(&mut bm)
+            .expect_err("a legacy f64 index must not load silently");
         let message = error.to_string();
         assert!(message.contains("64-bit"), "unexpected error: {message}");
         assert!(

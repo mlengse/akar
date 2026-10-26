@@ -68,10 +68,7 @@ mod sse2 {
             // s1 = [v0+v2, v1+v3, ...]  (_mm_movehl_ps is SSE2)
             let s1 = _mm_add_ps(v, _mm_movehl_ps(v, v));
             // s2[0] = s1[0] + s1[1] = v0+v1+v2+v3
-            _mm_cvtss_f32(_mm_add_ss(
-                s1,
-                _mm_shuffle_ps(s1, s1, 0x01),
-            ))
+            _mm_cvtss_f32(_mm_add_ss(s1, _mm_shuffle_ps(s1, s1, 0x01)))
         }
     }
 
@@ -94,11 +91,9 @@ mod sse2 {
             sq_a = _mm_add_ps(sq_a, _mm_mul_ps(x, x));
             sq_b = _mm_add_ps(sq_b, _mm_mul_ps(y, y));
         }
-        let mut acc = (
-            unsafe { hsum_ps(dot) },
-            unsafe { hsum_ps(sq_a) },
-            unsafe { hsum_ps(sq_b) },
-        );
+        let mut acc = (unsafe { hsum_ps(dot) }, unsafe { hsum_ps(sq_a) }, unsafe {
+            hsum_ps(sq_b)
+        });
         for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
             acc.0 += x * y;
             acc.1 += x * x;
@@ -192,11 +187,9 @@ mod avx {
             sq_a = _mm256_add_ps(sq_a, _mm256_mul_ps(x, x));
             sq_b = _mm256_add_ps(sq_b, _mm256_mul_ps(y, y));
         }
-        let mut acc = (
-            unsafe { hsum256_ps(dot) },
-            unsafe { hsum256_ps(sq_a) },
-            unsafe { hsum256_ps(sq_b) },
-        );
+        let mut acc = (unsafe { hsum256_ps(dot) }, unsafe { hsum256_ps(sq_a) }, unsafe {
+            hsum256_ps(sq_b)
+        });
         for (x, y) in a[chunks * 8..].iter().zip(b[chunks * 8..].iter()) {
             acc.0 += x * y;
             acc.1 += x * x;

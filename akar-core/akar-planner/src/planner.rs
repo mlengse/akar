@@ -292,7 +292,10 @@ impl QueryPlanner {
         let inner_op = if inner_plan.is_empty() {
             return Err("Cannot EXPLAIN an empty plan".into());
         } else if inner_plan.len() == 1 {
-            inner_plan.into_iter().next().ok_or_else(|| "EXPLAIN: single-item plan unexpectedly empty".to_string())?
+            inner_plan
+                .into_iter()
+                .next()
+                .ok_or_else(|| "EXPLAIN: single-item plan unexpectedly empty".to_string())?
         } else {
             // Wrap multi-operator pipeline in a projection root
             LogicalOperator::Projection(LogicalProjection {
