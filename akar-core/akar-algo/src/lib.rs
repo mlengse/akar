@@ -930,7 +930,9 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
     let mut lowlink = vec![0usize; n];
     let mut on_stack = vec![false; n];
     let mut stack: Vec<usize> = Vec::with_capacity(n);
-    let mut component = vec![0usize; n];
+    // Bolt Optimization: Pre-allocate `component` directly as `Vec<f64>` to eliminate secondary
+    // heap vector allocations and conversion loops (`component.iter().map(|&c| c as f64).collect()`).
+    let mut component = vec![0.0f64; n];
     let mut comp_id = 0usize;
     let mut next_index = 0usize;
     let mut dfs_stack: Vec<(usize, usize)> = Vec::with_capacity(n);
@@ -978,10 +980,11 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
                     lowlink[parent] = lowlink[parent].min(lowlink[v]);
                 }
                 if lowlink[v] == indices[v] {
+                    let comp_f64 = comp_id as f64;
                     loop {
                         let w = stack.pop().unwrap();
                         on_stack[w] = false;
-                        component[w] = comp_id;
+                        component[w] = comp_f64;
                         if w == v {
                             break;
                         }
@@ -994,7 +997,7 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
 
     AlgoResult {
         name: "scc_tarjan".into(),
-        values: component.iter().map(|&c| c as f64).collect(),
+        values: component,
         metadata: None,
     }
 }
