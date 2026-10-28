@@ -94,8 +94,10 @@ pub fn en_stem_analyzer() -> TextAnalyzer {
 pub fn cjk_analyzer() -> TextAnalyzer {
     // min_gram=1, max_gram=2 is a valid NgramTokenizer configuration by
     // construction (min_gram > 0 and min_gram <= max_gram).
-    let ngram = NgramTokenizer::all_ngrams(1, 2).unwrap_or_default();
-    TextAnalyzer::builder(ngram).filter(LowerCaser).build()
+    match NgramTokenizer::all_ngrams(1, 2) {
+        Ok(ngram) => TextAnalyzer::builder(ngram).filter(LowerCaser).build(),
+        Err(_) => TextAnalyzer::builder(SimpleTokenizer::default()).filter(LowerCaser).build(),
+    }
 }
 
 /// A [`TokenizerManager`] pre-registered with Akar's `en_stem` and `cjk`

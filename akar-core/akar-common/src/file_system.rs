@@ -90,12 +90,18 @@ impl VirtualFileSystemRegistry {
     }
 
     pub fn register_file_system(&self, fs: Box<dyn FileSystem>) {
-        let mut systems = self.systems.write().unwrap();
+        let mut systems = match self.systems.write() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         systems.push(fs);
     }
 
     pub fn open_read(&self, path: &str) -> std::io::Result<Box<dyn FileRead>> {
-        let systems = self.systems.read().unwrap();
+        let systems = match self.systems.read() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         for fs in systems.iter() {
             if fs.can_handle(path) {
                 return fs.open_read(path);
@@ -105,7 +111,10 @@ impl VirtualFileSystemRegistry {
     }
 
     pub fn open_write(&self, path: &str) -> std::io::Result<Box<dyn FileWrite>> {
-        let systems = self.systems.read().unwrap();
+        let systems = match self.systems.read() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         for fs in systems.iter() {
             if fs.can_handle(path) {
                 return fs.open_write(path);
@@ -115,7 +124,10 @@ impl VirtualFileSystemRegistry {
     }
 
     pub fn exists(&self, path: &str) -> bool {
-        let systems = self.systems.read().unwrap();
+        let systems = match self.systems.read() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         for fs in systems.iter() {
             if fs.can_handle(path) {
                 return fs.exists(path);
@@ -125,7 +137,10 @@ impl VirtualFileSystemRegistry {
     }
 
     pub fn remove(&self, path: &str) -> std::io::Result<()> {
-        let systems = self.systems.read().unwrap();
+        let systems = match self.systems.read() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         for fs in systems.iter() {
             if fs.can_handle(path) {
                 return fs.remove(path);
@@ -135,7 +150,10 @@ impl VirtualFileSystemRegistry {
     }
 
     pub fn create_dir_all(&self, path: &str) -> std::io::Result<()> {
-        let systems = self.systems.read().unwrap();
+        let systems = match self.systems.read() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         for fs in systems.iter() {
             if fs.can_handle(path) {
                 return fs.create_dir_all(path);

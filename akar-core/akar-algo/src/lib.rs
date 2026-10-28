@@ -956,7 +956,9 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
 
             if npos < neighbors.len() {
                 let (_, dst) = neighbors[npos];
-                dfs_stack.last_mut().unwrap().1 += 1;
+                if let Some(top) = dfs_stack.last_mut() {
+                    top.1 += 1;
+                }
                 let w = dst.offset as usize;
                 if w >= n {
                     continue;
@@ -981,8 +983,7 @@ pub fn compute_scc_tarjan(csr: &CSRAdjacency) -> AlgoResult {
                 }
                 if lowlink[v] == indices[v] {
                     let comp_f64 = comp_id as f64;
-                    loop {
-                        let w = stack.pop().unwrap();
+                    while let Some(w) = stack.pop() {
                         on_stack[w] = false;
                         component[w] = comp_f64;
                         if w == v {
@@ -1030,7 +1031,9 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
 
             if npos < neighbors.len() {
                 let (_, dst) = neighbors[npos];
-                dfs_stack.last_mut().unwrap().1 += 1;
+                if let Some(top) = dfs_stack.last_mut() {
+                    top.1 += 1;
+                }
                 let w = dst.offset as usize;
                 if w < n && !visited[w] {
                     visited[w] = true;

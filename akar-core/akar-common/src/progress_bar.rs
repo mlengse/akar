@@ -38,7 +38,7 @@ impl AkarProgress {
                 pb.set_style(
                     ProgressStyle::default_bar()
                         .template("{msg} [{bar:40}] {pos}/{len} ({eta})")
-                        .unwrap()
+                        .unwrap_or_else(|_| ProgressStyle::default_bar())
                         .progress_chars("=> "),
                 );
                 pb.set_message(msg.to_owned());
@@ -49,7 +49,7 @@ impl AkarProgress {
                 pb.set_style(
                     ProgressStyle::default_spinner()
                         .template("{spinner:.green} {msg}")
-                        .unwrap(),
+                        .unwrap_or_else(|_| ProgressStyle::default_spinner()),
                 );
                 pb.set_message(msg.to_owned());
                 pb.enable_steady_tick(Duration::from_millis(100));

@@ -91,7 +91,7 @@ pub(crate) fn evaluate_date(op: DateOp, args: &[Value]) -> Result<Value, String>
             let last_day = next_month_first
                 .previous_day()
                 .ok_or("Could not compute previous day")?;
-            let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).unwrap();
+            let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).map_err(|e| format!("Epoch error: {e}"))?;
             let days = (last_day - epoch).whole_days() as i32;
             Ok(Value::Date(Date(days)))
         }
@@ -113,7 +113,7 @@ pub(crate) fn evaluate_date(op: DateOp, args: &[Value]) -> Result<Value, String>
             };
             let month_enum = Month::try_from(month_val).map_err(|_| format!("Invalid month: {month_val}"))?;
             let d = TimeDate::from_calendar_date(year, month_enum, day).map_err(|e| format!("Invalid date: {e}"))?;
-            let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).unwrap();
+            let epoch = TimeDate::from_calendar_date(1970, Month::January, 1).map_err(|e| format!("Epoch error: {e}"))?;
             let days = (d - epoch).whole_days() as i32;
             Ok(Value::Date(Date(days)))
         }

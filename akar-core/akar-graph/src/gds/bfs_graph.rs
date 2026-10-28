@@ -241,7 +241,7 @@ impl BaseBFSGraph for DenseBFSGraph {
                 return true;
             }
             // slot has Some value — check cost
-            let existing_cost = slot.as_ref().unwrap().cost;
+            let existing_cost = slot.as_ref().map_or(f64::INFINITY, |p| p.cost);
             if weight < existing_cost {
                 *slot = Some(Box::new(ParentList::new_with_cost(
                     bound_node_id,
@@ -286,7 +286,7 @@ impl BaseBFSGraph for DenseBFSGraph {
                 )));
                 return true;
             }
-            let existing_cost = slot.as_ref().unwrap().cost;
+            let existing_cost = slot.as_ref().map_or(f64::INFINITY, |p| p.cost);
             if weight < existing_cost {
                 *slot = Some(Box::new(ParentList::new_with_cost(
                     bound_node_id,
@@ -498,17 +498,19 @@ impl BFSGraphManager {
 
     /// Get the current active graph.
     pub fn get_current_graph(&self) -> &dyn BaseBFSGraph {
+        static EMPTY_DENSE: std::sync::LazyLock<DenseBFSGraph> = std::sync::LazyLock::new(|| DenseBFSGraph::new(0));
+        static EMPTY_SPARSE: std::sync::LazyLock<SparseBFSGraph> = std::sync::LazyLock::new(SparseBFSGraph::new);
         match self.state {
-            GDSDensityState::Dense => self.dense_graph.as_ref().unwrap() as &dyn BaseBFSGraph,
-            GDSDensityState::Sparse => self.sparse_graph.as_ref().unwrap() as &dyn BaseBFSGraph,
+            GDSDensityState::Dense => self.dense_graph.as_ref().map(|g| g as &dyn BaseBFSGraph).unwrap_or(&*EMPTY_DENSE),
+            GDSDensityState::Sparse => self.sparse_graph.as_ref().map(|g| g as &dyn BaseBFSGraph).unwrap_or(&*EMPTY_SPARSE),
         }
     }
 
     /// Get the current active graph (mutable).
     pub fn get_current_graph_mut(&mut self) -> &mut dyn BaseBFSGraph {
         match self.state {
-            GDSDensityState::Dense => self.dense_graph.as_mut().unwrap() as &mut dyn BaseBFSGraph,
-            GDSDensityState::Sparse => self.sparse_graph.as_mut().unwrap() as &mut dyn BaseBFSGraph,
+            GDSDensityState::Dense => self.dense_graph.get_or_insert_with(|| DenseBFSGraph::new(0)),
+            GDSDensityState::Sparse => self.sparse_graph.get_or_insert_with(SparseBFSGraph::new),
         }
     }
 

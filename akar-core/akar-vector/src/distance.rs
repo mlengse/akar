@@ -64,6 +64,7 @@ mod sse2 {
     /// Horizontal sum of a 4-lane PS vector using only SSE2 instructions.
     #[inline]
     pub(crate) unsafe fn hsum_ps(v: __m128) -> f32 {
+        // SAFETY: SSE2 horizontal sum operates entirely within register state on valid 128-bit PS registers.
         unsafe {
             // s1 = [v0+v2, v1+v3, ...]  (_mm_movehl_ps is SSE2)
             let s1 = _mm_add_ps(v, _mm_movehl_ps(v, v));
@@ -85,12 +86,15 @@ mod sse2 {
         let mut sq_a = _mm_setzero_ps();
         let mut sq_b = _mm_setzero_ps();
         for i in 0..chunks {
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 4 + 4 <= a.len())`.
             let x = unsafe { _mm_loadu_ps(a.as_ptr().add(i * 4)) };
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 4 + 4 <= b.len())`.
             let y = unsafe { _mm_loadu_ps(b.as_ptr().add(i * 4)) };
             dot = _mm_add_ps(dot, _mm_mul_ps(x, y));
             sq_a = _mm_add_ps(sq_a, _mm_mul_ps(x, x));
             sq_b = _mm_add_ps(sq_b, _mm_mul_ps(y, y));
         }
+        // SAFETY: Registered sums are valid 128-bit PS lane values.
         let mut acc = (unsafe { hsum_ps(dot) }, unsafe { hsum_ps(sq_a) }, unsafe {
             hsum_ps(sq_b)
         });
@@ -113,11 +117,14 @@ mod sse2 {
         let chunks = a.len() / 4;
         let mut acc = _mm_setzero_ps();
         for i in 0..chunks {
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 4 + 4 <= a.len())`.
             let x = unsafe { _mm_loadu_ps(a.as_ptr().add(i * 4)) };
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 4 + 4 <= b.len())`.
             let y = unsafe { _mm_loadu_ps(b.as_ptr().add(i * 4)) };
             let d = _mm_sub_ps(x, y);
             acc = _mm_add_ps(acc, _mm_mul_ps(d, d));
         }
+        // SAFETY: Vector accumulation register contains valid 128-bit PS lane values.
         let mut sum = unsafe { hsum_ps(acc) };
         for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
             let d = x - y;
@@ -138,11 +145,14 @@ mod sse2 {
         let mut acc = _mm_setzero_ps();
         let sign = _mm_set1_ps(-0.0);
         for i in 0..chunks {
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 4 + 4 <= a.len())`.
             let x = unsafe { _mm_loadu_ps(a.as_ptr().add(i * 4)) };
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 4 + 4 <= b.len())`.
             let y = unsafe { _mm_loadu_ps(b.as_ptr().add(i * 4)) };
             let d = _mm_sub_ps(x, y);
             acc = _mm_add_ps(acc, _mm_andnot_ps(sign, d));
         }
+        // SAFETY: Vector accumulation register contains valid 128-bit PS lane values.
         let mut sum = unsafe { hsum_ps(acc) };
         for (x, y) in a[chunks * 4..].iter().zip(b[chunks * 4..].iter()) {
             sum += (x - y).abs();
@@ -160,6 +170,7 @@ mod avx {
     /// SSE2 horizontal sum.
     #[inline]
     pub(crate) unsafe fn hsum256_ps(v: __m256) -> f32 {
+        // SAFETY: AVX lane extraction and reduction operate within register state on valid 256-bit PS registers.
         unsafe {
             let lo = _mm256_castps256_ps128(v);
             let hi = _mm256_extractf128_ps(v, 1);
@@ -181,12 +192,15 @@ mod avx {
         let mut sq_a = _mm256_setzero_ps();
         let mut sq_b = _mm256_setzero_ps();
         for i in 0..chunks {
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 8 + 8 <= a.len())`.
             let x = unsafe { _mm256_loadu_ps(a.as_ptr().add(i * 8)) };
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 8 + 8 <= b.len())`.
             let y = unsafe { _mm256_loadu_ps(b.as_ptr().add(i * 8)) };
             dot = _mm256_add_ps(dot, _mm256_mul_ps(x, y));
             sq_a = _mm256_add_ps(sq_a, _mm256_mul_ps(x, x));
             sq_b = _mm256_add_ps(sq_b, _mm256_mul_ps(y, y));
         }
+        // SAFETY: Reduction values are valid 256-bit PS lane values.
         let mut acc = (unsafe { hsum256_ps(dot) }, unsafe { hsum256_ps(sq_a) }, unsafe {
             hsum256_ps(sq_b)
         });
@@ -209,11 +223,14 @@ mod avx {
         let chunks = a.len() / 8;
         let mut acc = _mm256_setzero_ps();
         for i in 0..chunks {
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 8 + 8 <= a.len())`.
             let x = unsafe { _mm256_loadu_ps(a.as_ptr().add(i * 8)) };
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 8 + 8 <= b.len())`.
             let y = unsafe { _mm256_loadu_ps(b.as_ptr().add(i * 8)) };
             let d = _mm256_sub_ps(x, y);
             acc = _mm256_add_ps(acc, _mm256_mul_ps(d, d));
         }
+        // SAFETY: Vector accumulation register contains valid 256-bit PS lane values.
         let mut sum = unsafe { hsum256_ps(acc) };
         for (x, y) in a[chunks * 8..].iter().zip(b[chunks * 8..].iter()) {
             let d = x - y;
@@ -234,11 +251,14 @@ mod avx {
         let mut acc = _mm256_setzero_ps();
         let sign = _mm256_set1_ps(-0.0);
         for i in 0..chunks {
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 8 + 8 <= a.len())`.
             let x = unsafe { _mm256_loadu_ps(a.as_ptr().add(i * 8)) };
+            // SAFETY: Unaligned vector loads stay within slice bounds `(i * 8 + 8 <= b.len())`.
             let y = unsafe { _mm256_loadu_ps(b.as_ptr().add(i * 8)) };
             let d = _mm256_sub_ps(x, y);
             acc = _mm256_add_ps(acc, _mm256_andnot_ps(sign, d));
         }
+        // SAFETY: Vector accumulation register contains valid 256-bit PS lane values.
         let mut sum = unsafe { hsum256_ps(acc) };
         for (x, y) in a[chunks * 8..].iter().zip(b[chunks * 8..].iter()) {
             sum += (x - y).abs();

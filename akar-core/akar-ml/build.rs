@@ -44,9 +44,9 @@ fn main() {
         return;
     }
 
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()));
     let staging = manifest_dir.join("models").join(".staging");
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("assets");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap_or_else(|_| "target".into())).join("assets");
 
     println!("cargo:rustc-env=AKAR_ML_ASSET_DIR={}", out_dir.display());
     println!("cargo:rerun-if-changed={}", staging.display());

@@ -263,7 +263,7 @@ impl TransactionContext {
         }
         let txn = self.manager.begin_write()?;
         self.active_txn = Some(txn);
-        Ok(self.active_txn.as_ref().unwrap())
+        self.active_txn.as_ref().ok_or(TransactionError::NoActiveTransaction)
     }
 
     /// Begin a write transaction (implicit, for AUTO mode DDL/DML).
@@ -274,7 +274,7 @@ impl TransactionContext {
         }
         let txn = self.manager.begin_write()?;
         self.active_txn = Some(txn);
-        Ok(self.active_txn.as_ref().unwrap())
+        self.active_txn.as_ref().ok_or(TransactionError::NoActiveTransaction)
     }
 
     /// Commit the active transaction.
@@ -301,8 +301,8 @@ impl TransactionContext {
         F: FnOnce(&Transaction) -> Result<T, TransactionError>,
     {
         let _txn = self.begin_implicit()?;
-        let _txn_id = self.active_txn_id().unwrap();
-        let result = exec_fn(self.active_txn.as_ref().unwrap())?;
+        let active = self.active_txn.as_ref().ok_or(TransactionError::NoActiveTransaction)?;
+        let result = exec_fn(active)?;
         self.commit()?;
         Ok(result)
     }
@@ -724,10 +724,12 @@ impl CheckpointCoordinator {
                     }
                     thread::sleep(Duration::from_millis(1000));
                 }
-            })
-            .expect("Failed to spawn auto-checkpoint worker");
+            });
 
-        self.worker_handle = Some(handle);
+        match handle {
+            Ok(h) => self.worker_handle = Some(h),
+            Err(e) => tracing::error!("Failed to spawn auto-checkpoint worker: {e}"),
+        }
     }
 
     fn request_shutdown(&self) {
@@ -827,11 +829,12 @@ impl TransactionManager {
     pub fn commit(&self, transaction: &mut Transaction) -> Result<CommitResult, TransactionError> {
         if transaction.transaction_type == TransactionType::ReadOnly {
             transaction.status = TransactionStatus::Committed;
-            transaction.commit_ts = Some(self.lifecycle.assign_commit_ts());
+            let commit_ts = self.lifecycle.assign_commit_ts();
+            transaction.commit_ts = Some(commit_ts);
             self.lifecycle.deregister(transaction.transaction_id);
             self.concurrency.release_locks(transaction.transaction_id);
             return Ok(CommitResult::Committed {
-                commit_ts: transaction.commit_ts.unwrap(),
+                commit_ts,
             });
         }
 
@@ -881,11 +884,12 @@ impl TransactionManager {
     pub fn prepare_commit(&self, transaction: &mut Transaction) -> Result<CommitResult, TransactionError> {
         if transaction.transaction_type == TransactionType::ReadOnly {
             transaction.status = TransactionStatus::Committed;
-            transaction.commit_ts = Some(self.lifecycle.assign_commit_ts());
+            let commit_ts = self.lifecycle.assign_commit_ts();
+            transaction.commit_ts = Some(commit_ts);
             self.lifecycle.deregister(transaction.transaction_id);
             self.concurrency.release_locks(transaction.transaction_id);
             return Ok(CommitResult::Committed {
-                commit_ts: transaction.commit_ts.unwrap(),
+                commit_ts,
             });
         }
 

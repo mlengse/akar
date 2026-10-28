@@ -111,7 +111,10 @@ impl MemoryAccountant {
     /// Attribute `amount` bytes to `attr`.
     pub fn allocate(&self, attr: MemoryAttribution, amount: u64) {
         self.total.fetch_add(amount, Ordering::Relaxed);
-        let mut by_class = self.by_class.lock().unwrap();
+        let mut by_class = match self.by_class.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         *by_class.entry(attr.class).or_insert(0) += amount;
     }
 
@@ -123,7 +126,10 @@ impl MemoryAccountant {
                 Some(prev.saturating_sub(amount))
             })
             .ok();
-        let mut by_class = self.by_class.lock().unwrap();
+        let mut by_class = match self.by_class.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         if let Some(bytes) = by_class.get_mut(&attr.class) {
             *bytes = bytes.saturating_sub(amount);
         }
@@ -136,15 +142,20 @@ impl MemoryAccountant {
 
     /// Attributed bytes for one class (0 if never allocated).
     pub fn class_usage(&self, class: MemoryAccountingClass) -> u64 {
-        self.by_class.lock().unwrap().get(&class).copied().unwrap_or(0)
+        let guard = match self.by_class.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.get(&class).copied().unwrap_or(0)
     }
 
     /// Snapshot of `(class, bytes)` for reporting, non-zero classes only.
     pub fn snapshot(&self) -> Vec<(MemoryAccountingClass, u64)> {
-        let mut out: Vec<(MemoryAccountingClass, u64)> = self
-            .by_class
-            .lock()
-            .unwrap()
+        let guard = match self.by_class.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let mut out: Vec<(MemoryAccountingClass, u64)> = guard
             .iter()
             .map(|(&class, &bytes)| (class, bytes))
             .filter(|(_, bytes)| *bytes > 0)

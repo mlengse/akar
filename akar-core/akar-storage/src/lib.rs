@@ -216,7 +216,12 @@ impl StorageManager {
     /// tables that already exist as well as future ones. A `None` clears the
     /// spiller.
     pub fn set_spiller(&self, spiller: Option<Arc<Spiller>>) {
-        *self.spiller.write().unwrap() = spiller.clone();
+        let mut guard = match self.spiller.write() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        *guard = spiller.clone();
+        drop(guard);
         // Collect IDs first: `all_node_tables()` holds shard read-locks for
         // the returned refs, so a subsequent `get_node_table_mut` (write-lock
         // on the same shard) would deadlock (P51.44).

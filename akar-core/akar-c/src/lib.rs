@@ -102,6 +102,7 @@ pub unsafe extern "C" fn akar_database_init(
             return akar_state::AkarError;
         }
 
+        // SAFETY: database_path was checked non-null and is guaranteed by caller to be a valid NUL-terminated C string.
         let path = unsafe { CStr::from_ptr(database_path).to_string_lossy().into_owned() };
 
         let config = SystemConfig {
@@ -121,6 +122,7 @@ pub unsafe extern "C" fn akar_database_init(
             Ok(db) => {
                 let db_arc = Arc::new(db);
                 let arc_ptr = Box::into_raw(Box::new(db_arc));
+                // SAFETY: out_database was verified non-null and writable by the caller contract.
                 unsafe {
                     (*out_database)._database = arc_ptr as *mut c_void;
                 }
@@ -143,6 +145,7 @@ pub unsafe extern "C" fn akar_database_init(
 pub unsafe extern "C" fn akar_database_destroy(database: *mut akar_database) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if !database.is_null() {
+            // SAFETY: database was checked non-null; frees inner Arc<Database> and nulls the pointer to prevent double-free.
             unsafe {
                 let ptr = (*database)._database;
                 if !ptr.is_null() {
@@ -169,6 +172,7 @@ pub unsafe extern "C" fn akar_connection_init(
     database: *mut akar_database,
     out_connection: *mut akar_connection,
 ) -> akar_state {
+    // SAFETY: Validates pointers, extracts Database reference, and initializes out_connection handle.
     catch(|| unsafe {
         if database.is_null() || out_connection.is_null() || (*database)._database.is_null() {
             return akar_state::AkarError;
@@ -196,6 +200,7 @@ pub unsafe extern "C" fn akar_connection_init(
 pub unsafe extern "C" fn akar_connection_destroy(connection: *mut akar_connection) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if !connection.is_null() {
+            // SAFETY: connection was checked non-null; frees inner Connection and nulls the handle to prevent double-free.
             unsafe {
                 let ptr = (*connection)._connection;
                 if !ptr.is_null() {
@@ -233,6 +238,7 @@ pub unsafe extern "C" fn akar_connection_query(
     error_message: *mut *mut c_char,
 ) -> akar_state {
     catch(|| {
+        // SAFETY: Checks null pointers, converts C query string to Rust str, runs query and writes output result handle.
         unsafe {
             if connection.is_null()
                 || query.is_null()
@@ -285,6 +291,7 @@ pub unsafe extern "C" fn akar_connection_query(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn akar_error_message_free(msg: *mut c_char) {
     if !msg.is_null() {
+        // SAFETY: msg is non-null and was allocated via CString::into_raw in akar_connection_query.
         unsafe {
             drop(CString::from_raw(msg));
         }
@@ -306,6 +313,7 @@ pub unsafe extern "C" fn akar_error_message_free(msg: *mut c_char) {
 pub unsafe extern "C" fn akar_query_result_destroy(query_result: *mut akar_query_result) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if !query_result.is_null() {
+            // SAFETY: query_result was verified non-null; frees underlying QueryResult and resets fields.
             unsafe {
                 let ptr = (*query_result)._query_result;
                 if !ptr.is_null() {

@@ -155,7 +155,10 @@ impl<W: WalLike> GroupCommit<W> {
 
     /// Current cumulative statistics.
     pub fn stats(&self) -> GroupCommitStats {
-        *self.stats.lock().unwrap()
+        match self.stats.lock() {
+            Ok(g) => *g,
+            Err(p) => *p.into_inner(),
+        }
     }
 
     /// Wait for a durable flush of everything appended so far.

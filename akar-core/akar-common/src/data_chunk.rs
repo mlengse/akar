@@ -132,7 +132,9 @@ impl DataChunk {
         let indices = arrow::array::UInt32Array::from_iter_values(sel.indices[..sel.size].iter().copied());
 
         for field in &mut self.fields {
-            *field = take(field.as_ref(), &indices, None).unwrap();
+            if let Ok(taken) = take(field.as_ref(), &indices, None) {
+                *field = taken;
+            }
         }
         self.size = sel.size;
     }

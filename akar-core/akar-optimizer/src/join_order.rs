@@ -562,7 +562,9 @@ fn build_optimal_tree(
         return scans[idx].2.clone();
     }
 
-    let state = dp[mask].as_ref().unwrap();
+    let Some(state) = dp.get(mask).and_then(|s| s.as_ref()) else {
+        return scans[0].2.clone();
+    };
     let left_op = build_optimal_tree(state.left_mask, dp, scans, conditions, original_join_keys, alias_to_idx);
     let right_op = build_optimal_tree(
         state.right_mask,
@@ -618,8 +620,8 @@ fn build_optimal_tree(
             cardinality: state.cardinality as u64,
         })
     } else {
-        let left_card = dp[state.left_mask].as_ref().unwrap().cardinality;
-        let right_card = dp[state.right_mask].as_ref().unwrap().cardinality;
+        let left_card = dp.get(state.left_mask).and_then(|s| s.as_ref()).map_or(0.0, |s| s.cardinality);
+        let right_card = dp.get(state.right_mask).and_then(|s| s.as_ref()).map_or(0.0, |s| s.cardinality);
 
         if left_card >= right_card {
             LogicalOperator::HashJoin(LogicalHashJoin {

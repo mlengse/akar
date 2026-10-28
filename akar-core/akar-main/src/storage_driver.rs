@@ -82,27 +82,28 @@ impl StorageDriver {
 
     /// Number of tables (node + rel) in the catalog.
     pub fn num_tables(&self) -> usize {
-        self.catalog.lock().unwrap().all_entries().count()
+        match self.catalog.lock() {
+            Ok(c) => c.all_entries().count(),
+            Err(p) => p.into_inner().all_entries().count(),
+        }
     }
 
     /// Number of node tables.
     pub fn num_node_tables(&self) -> usize {
-        self.catalog
-            .lock()
-            .unwrap()
-            .all_entries()
-            .filter(|e| e.is_node_table())
-            .count()
+        let guard = match self.catalog.lock() {
+            Ok(c) => c,
+            Err(p) => p.into_inner(),
+        };
+        guard.all_entries().filter(|e| e.is_node_table()).count()
     }
 
     /// Number of rel tables.
     pub fn num_rel_tables(&self) -> usize {
-        self.catalog
-            .lock()
-            .unwrap()
-            .all_entries()
-            .filter(|e| !e.is_node_table())
-            .count()
+        let guard = match self.catalog.lock() {
+            Ok(c) => c,
+            Err(p) => p.into_inner(),
+        };
+        guard.all_entries().filter(|e| !e.is_node_table()).count()
     }
 
     /// Total number of pages allocated across all data files.

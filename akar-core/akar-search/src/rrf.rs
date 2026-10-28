@@ -46,7 +46,7 @@ where
         .map(|(score, item)| FusedItem { item, rrf_score: score })
         .collect();
 
-    results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
+    results.sort_by(|a, b| b.rrf_score.total_cmp(&a.rrf_score));
     results.truncate(limit);
     results
 }
@@ -79,7 +79,7 @@ where
         .map(|(score, item)| FusedItem { item, rrf_score: score })
         .collect();
 
-    results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap());
+    results.sort_by(|a, b| b.rrf_score.total_cmp(&a.rrf_score));
     results.truncate(limit);
     results
 }

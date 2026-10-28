@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! Shared test helpers — single source of truth for all Akar tests.
 //!
 //! Provides `setup_db` (in-memory) and common assertion helpers.

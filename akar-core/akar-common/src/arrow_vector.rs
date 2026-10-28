@@ -92,7 +92,7 @@ impl ArrowVector {
                 .add_buffer(data_buffer)
                 .null_bit_buffer(Some(null_buffer))
                 .build()
-                .unwrap();
+                .unwrap_or_else(|_| arrow::array::ArrayData::new_empty(&data_type));
             arrow::array::make_array(array_data)
         };
 

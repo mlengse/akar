@@ -480,6 +480,7 @@ impl BufferManager {
             if !self.mmap_regions.contains_key(&path_str) {
                 match std::fs::File::open(&fh.path) {
                     Ok(file) => {
+                        // SAFETY: File was opened successfully in read mode and buffer manager exclusively controls access to the mapped byte range.
                         let mmap = unsafe { memmap2::Mmap::map(&file)? };
                         self.mmap_regions.insert(path_str.clone(), mmap);
                     }
