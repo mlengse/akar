@@ -25,8 +25,8 @@ pub struct VectorVersionInfo {
 impl Clone for VectorVersionInfo {
     fn clone(&self) -> Self {
         Self {
-            inserted: Mutex::new(self.inserted.lock().unwrap().clone()),
-            deleted: Mutex::new(self.deleted.lock().unwrap().clone()),
+            inserted: Mutex::new(self.inserted.lock().map(|m| m.clone()).unwrap_or_default()),
+            deleted: Mutex::new(self.deleted.lock().map(|m| m.clone()).unwrap_or_default()),
         }
     }
 }
@@ -47,14 +47,16 @@ impl VectorVersionInfo {
 
     /// Record that `txn_id` inserted a row at `row_in_vector`.
     pub fn insert(&self, txn_id: u64, row_in_vector: u32) {
-        let mut ins = self.inserted.lock().unwrap();
-        ins.insert(row_in_vector, txn_id);
+        if let Ok(mut ins) = self.inserted.lock() {
+            ins.insert(row_in_vector, txn_id);
+        }
     }
 
     /// Record that `txn_id` deleted a row at `row_in_vector`.
     pub fn delete(&self, txn_id: u64, row_in_vector: u32) {
-        let mut del = self.deleted.lock().unwrap();
-        del.insert(row_in_vector, txn_id);
+        if let Ok(mut del) = self.deleted.lock() {
+            del.insert(row_in_vector, txn_id);
+        }
     }
 
     /// Drop all recorded inserts and deletes for this vector.
@@ -63,8 +65,12 @@ impl VectorVersionInfo {
     /// reuse (spill/restore), so stale row-offset records do not collide
     /// with rows appended afterwards at the same offsets.
     pub fn reset(&self) {
-        self.inserted.lock().unwrap().clear();
-        self.deleted.lock().unwrap().clear();
+        if let Ok(mut ins) = self.inserted.lock() {
+            ins.clear();
+        }
+        if let Ok(mut del) = self.deleted.lock() {
+            del.clear();
+        }
     }
 
     /// Check whether a specific row is visible at the given snapshot.

@@ -668,16 +668,32 @@ impl ArtPrimaryKeyIndex {
             .pin(file_name, 0)
             .map_err(|e| StorageError::Index(format!("Failed to pin ART header page: {e}")))?;
         let data = &frame.data;
-
-        let magic = u64::from_le_bytes(data[0..8].try_into().unwrap());
+        let err = || StorageError::Index("Corrupted ART index header page".into());
+        let magic = u64::from_le_bytes(
+            data.get(0..8)
+                .and_then(|s| s.try_into().ok())
+                .ok_or_else(err)?,
+        );
         if magic != ART_HEADER_MAGIC {
             bm.unpin(file_name, 0);
             return Err(StorageError::Index("Invalid ART index magic number".into()));
         }
 
-        let num_entries = u64::from_le_bytes(data[8..16].try_into().unwrap());
-        let page_count = u64::from_le_bytes(data[16..24].try_into().unwrap());
-        let tree_size = u64::from_le_bytes(data[24..32].try_into().unwrap());
+        let num_entries = u64::from_le_bytes(
+            data.get(8..16)
+                .and_then(|s| s.try_into().ok())
+                .ok_or_else(err)?,
+        );
+        let page_count = u64::from_le_bytes(
+            data.get(16..24)
+                .and_then(|s| s.try_into().ok())
+                .ok_or_else(err)?,
+        );
+        let tree_size = u64::from_le_bytes(
+            data.get(24..32)
+                .and_then(|s| s.try_into().ok())
+                .ok_or_else(err)?,
+        );
         bm.unpin(file_name, 0);
 
         // Read tree data

@@ -598,7 +598,7 @@ impl QueryPlanner {
         let right_plan = self.plan_query(*u.right)?;
 
         let left_op = if left_plan.len() == 1 {
-            left_plan.into_iter().next().unwrap()
+            left_plan.into_iter().next().ok_or_else(|| PlannerError::Planning("Empty left union plan".into()))?
         } else {
             // Wrap multi-operator pipeline in a projection root
             LogicalOperator::Projection(LogicalProjection {
@@ -609,7 +609,7 @@ impl QueryPlanner {
         };
 
         let right_op = if right_plan.len() == 1 {
-            right_plan.into_iter().next().unwrap()
+            right_plan.into_iter().next().ok_or_else(|| PlannerError::Planning("Empty right union plan".into()))?
         } else {
             LogicalOperator::Projection(LogicalProjection {
                 expressions: Vec::new(),
@@ -927,7 +927,9 @@ impl QueryPlanner {
                     let mut left_pipeline: Vec<LogicalOperator> = Vec::new();
                     if !scan_ops.is_empty() {
                         if scan_ops.len() == 1 {
-                            left_pipeline.push(scan_ops.into_iter().next().unwrap());
+                            if let Some(op) = scan_ops.into_iter().next() {
+                                left_pipeline.push(op);
+                            }
                         } else {
                             let join_plan = build_join_tree(scan_ops, filter_expr.as_ref());
                             let flattened = flatten_join_plan(&join_plan);
@@ -945,17 +947,17 @@ impl QueryPlanner {
                         left_pipeline.push(LogicalOperator::Projection(proj));
                     }
                     if edge_probe {
-                        let edge = om.patterns[0].edge.as_ref().unwrap();
-                        let src_var = om.patterns[0].node_variable.clone().unwrap();
+                        let edge = om.patterns[0].edge.as_ref().ok_or_else(|| PlannerError::Planning("Missing edge in pattern".into()))?;
+                        let src_var = om.patterns[0].node_variable.clone().unwrap_or_default();
                         // Anonymous destination (P53.40 fan-out): empty string
                         // tells the physical operator to emit every incident
                         // edge instead of probing a specific pair.
                         let dst_var = om.patterns[1].node_variable.clone().unwrap_or_default();
                         delete_exprs.push(LogicalOperator::OptionalExtend(LogicalOptionalExtend {
                             children: left_pipeline,
-                            rel_table_name: edge.label.clone().unwrap(),
+                            rel_table_name: edge.label.clone().unwrap_or_default(),
                             rel_table_id: edge.rel_table_id.unwrap_or(0),
-                            rel_var: edge.variable.clone().unwrap(),
+                            rel_var: edge.variable.clone().unwrap_or_default(),
                             src_node_var: src_var,
                             dst_node_var: dst_var,
                             direction: edge.direction.clone(),
@@ -963,7 +965,17 @@ impl QueryPlanner {
                         }));
                     } else {
                         let left_op = if left_pipeline.len() == 1 {
-                            left_pipeline.into_iter().next().unwrap()
+                            left_pipeline.into_iter().next().unwrap_or_else(|| {
+                                LogicalOperator::ScanNode(LogicalScanNode {
+                                    table_name: String::new(),
+                                    table_id: 0,
+                                    alias: None,
+                                    columns: Vec::new(),
+                                    cardinality: 0,
+                                    fts_query: None,
+                                    predicate: None,
+                                })
+                            })
                         } else if left_pipeline.is_empty() {
                             // Empty left side — use a dummy scan
                             LogicalOperator::ScanNode(LogicalScanNode {
@@ -1042,18 +1054,27 @@ impl QueryPlanner {
                                 }
                             }
                         }
-                        if !inline_exprs.is_empty() {
-                            let combined = inline_exprs.into_iter().reduce(|acc, e| {
-                                Expression::BinaryOp(akar_parser::ast::BinaryOp::And, Box::new(acc), Box::new(e))
-                            });
+                        if let Some(combined) = inline_exprs.into_iter().reduce(|acc, e| {
+                            Expression::BinaryOp(akar_parser::ast::BinaryOp::And, Box::new(acc), Box::new(e))
+                        }) {
                             right_ops.push(LogicalOperator::Filter(LogicalFilter {
-                                expression: combined.unwrap(),
+                                expression: combined,
                                 children: Vec::new(),
                                 cardinality: 0,
                             }));
                         }
                         let right_op = if right_ops.len() == 1 {
-                            right_ops.into_iter().next().unwrap()
+                            right_ops.into_iter().next().unwrap_or_else(|| {
+                                LogicalOperator::ScanNode(LogicalScanNode {
+                                    table_name: String::new(),
+                                    table_id: 0,
+                                    alias: None,
+                                    columns: Vec::new(),
+                                    cardinality: 0,
+                                    fts_query: None,
+                                    predicate: None,
+                                })
+                            })
                         } else if right_ops.is_empty() {
                             LogicalOperator::ScanNode(LogicalScanNode {
                                 table_name: String::new(),
@@ -1296,7 +1317,9 @@ impl QueryPlanner {
 
         if scan_ops.len() == 1 {
             // Single scan — no join needed
-            result.push(scan_ops.into_iter().next().unwrap());
+            if let Some(op) = scan_ops.into_iter().next() {
+                result.push(op);
+            }
         } else {
             // Multiple scans — build join tree with greedy ordering
             let join_plan = build_join_tree(scan_ops, filter_expr.as_ref());

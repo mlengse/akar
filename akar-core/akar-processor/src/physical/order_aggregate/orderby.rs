@@ -32,10 +32,10 @@ impl<'a> ChunkAccessor<'a> {
     }
 
     fn total_rows(&self) -> usize {
-        self.offsets
-            .last()
-            .map(|&o| o + self.chunks.last().unwrap().size)
-            .unwrap_or(0)
+        match (self.offsets.last(), self.chunks.last()) {
+            (Some(&o), Some(chunk)) => o + chunk.size,
+            _ => 0,
+        }
     }
 
     fn resolve(&self, global_row: usize) -> (usize, usize) {
@@ -112,9 +112,11 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
                     .sort_keys
                     .iter()
                     .filter(|&&(col, _)| (col as usize) < num_fields)
-                    .map(|&(col, asc)| {
-                        let idx = sort_cols.iter().position(|&c| c == col).unwrap() as u32;
-                        (idx, asc)
+                    .filter_map(|&(col, asc)| {
+                        sort_cols
+                            .iter()
+                            .position(|&c| c == col)
+                            .map(|idx| (idx as u32, asc))
                     })
                     .collect();
                 let sorter = BlockMergeSorter::new(block_size, compact_keys);

@@ -8,7 +8,6 @@
 //! the commit path needs to serialize.
 
 use crate::wal::WALRecord;
-use std::io::Write;
 
 /// A serialized WAL buffer backed by an in-memory byte vector.
 ///
@@ -38,19 +37,18 @@ impl LocalWAL {
 
     /// Serialize a WAL record into the in-memory buffer.
     fn write_record(&mut self, record: &WALRecord) {
-        use akar_common::serialization::Serialize;
         match record {
             WALRecord::Insert { table_id, data } => {
-                self.buffer.write_all(b"I").unwrap();
-                table_id.serialize(&mut self.buffer).unwrap();
-                (data.len() as u32).serialize(&mut self.buffer).unwrap();
-                self.buffer.write_all(data).unwrap();
+                self.buffer.push(b'I');
+                self.buffer.extend_from_slice(&table_id.to_le_bytes());
+                self.buffer.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                self.buffer.extend_from_slice(data);
                 self.size += 1 + 8 + 4 + data.len();
             }
             WALRecord::Delete { table_id, row_id } => {
-                self.buffer.write_all(b"D").unwrap();
-                table_id.serialize(&mut self.buffer).unwrap();
-                row_id.serialize(&mut self.buffer).unwrap();
+                self.buffer.push(b'D');
+                self.buffer.extend_from_slice(&table_id.to_le_bytes());
+                self.buffer.extend_from_slice(&row_id.to_le_bytes());
                 self.size += 1 + 8 + 8;
             }
             WALRecord::Update {
@@ -59,19 +57,19 @@ impl LocalWAL {
                 column,
                 data,
             } => {
-                self.buffer.write_all(b"U").unwrap();
-                table_id.serialize(&mut self.buffer).unwrap();
-                row_id.serialize(&mut self.buffer).unwrap();
-                column.serialize(&mut self.buffer).unwrap();
-                (data.len() as u32).serialize(&mut self.buffer).unwrap();
-                self.buffer.write_all(data).unwrap();
+                self.buffer.push(b'U');
+                self.buffer.extend_from_slice(&table_id.to_le_bytes());
+                self.buffer.extend_from_slice(&row_id.to_le_bytes());
+                self.buffer.extend_from_slice(&column.to_le_bytes());
+                self.buffer.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                self.buffer.extend_from_slice(data);
                 self.size += 1 + 8 + 8 + 4 + 4 + data.len();
             }
             WALRecord::UpdateFsm { page_idx, is_free } => {
-                self.buffer.write_all(b"F").unwrap();
-                page_idx.serialize(&mut self.buffer).unwrap();
+                self.buffer.push(b'F');
+                self.buffer.extend_from_slice(&page_idx.to_le_bytes());
                 let is_free_u8: u8 = if *is_free { 1 } else { 0 };
-                is_free_u8.serialize(&mut self.buffer).unwrap();
+                self.buffer.push(is_free_u8);
                 self.size += 1 + 8 + 1;
             }
             WALRecord::ColumnWrite {
@@ -80,35 +78,35 @@ impl LocalWAL {
                 page_id,
                 data,
             } => {
-                self.buffer.write_all(b"W").unwrap();
-                table_id.serialize(&mut self.buffer).unwrap();
-                col_id.serialize(&mut self.buffer).unwrap();
-                page_id.serialize(&mut self.buffer).unwrap();
-                (data.len() as u32).serialize(&mut self.buffer).unwrap();
-                self.buffer.write_all(data).unwrap();
+                self.buffer.push(b'W');
+                self.buffer.extend_from_slice(&table_id.to_le_bytes());
+                self.buffer.extend_from_slice(&col_id.to_le_bytes());
+                self.buffer.extend_from_slice(&page_id.to_le_bytes());
+                self.buffer.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                self.buffer.extend_from_slice(data);
                 self.size += 1 + 8 + 4 + 8 + 4 + data.len();
             }
             WALRecord::Commit { transaction_id } => {
-                self.buffer.write_all(b"C").unwrap();
-                transaction_id.serialize(&mut self.buffer).unwrap();
+                self.buffer.push(b'C');
+                self.buffer.extend_from_slice(&transaction_id.to_le_bytes());
                 self.size += 1 + 8;
             }
             WALRecord::Rollback { transaction_id } => {
-                self.buffer.write_all(b"R").unwrap();
-                transaction_id.serialize(&mut self.buffer).unwrap();
+                self.buffer.push(b'R');
+                self.buffer.extend_from_slice(&transaction_id.to_le_bytes());
                 self.size += 1 + 8;
             }
             WALRecord::Checkpoint => {
-                self.buffer.write_all(b"K").unwrap();
+                self.buffer.push(b'K');
                 self.size += 1;
             }
             // LocalWALData is the raw buffer from a committed LocalWAL.
             // It is never written by a LocalWAL itself (only by the global WAL
             // when merging). We log it as raw bytes with the 'L' tag.
             WALRecord::LocalWALData { data } => {
-                self.buffer.write_all(b"L").unwrap();
-                (data.len() as u32).serialize(&mut self.buffer).unwrap();
-                self.buffer.write_all(data).unwrap();
+                self.buffer.push(b'L');
+                self.buffer.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                self.buffer.extend_from_slice(data);
                 self.size += 1 + 4 + data.len();
             }
             // DDL variants — each writes a tag + u64 table_id
@@ -127,8 +125,8 @@ impl LocalWAL {
                     WALRecord::CreateSequence { .. } => b'Q',
                     _ => unreachable!(),
                 };
-                self.buffer.write_all(&[tag]).unwrap();
-                table_id.serialize(&mut self.buffer).unwrap();
+                self.buffer.push(tag);
+                self.buffer.extend_from_slice(&table_id.to_le_bytes());
                 self.size += 1 + 8;
             }
         }

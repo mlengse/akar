@@ -98,7 +98,7 @@ impl FreeSpaceManager {
         // Format: [num_ranges: u32] [range1: start(u64), num(u64)] ...
         let mut ranges = Vec::new();
         for list in &self.free_lists {
-            for range in list.read().unwrap().iter() {
+            for range in list.read().unwrap_or_else(|e| e.into_inner()).iter() {
                 ranges.push(*range);
             }
         }
@@ -118,7 +118,11 @@ impl FreeSpaceManager {
                 "Data too short for FSM",
             ));
         }
-        let num_ranges = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let num_ranges = u32::from_le_bytes(
+            data[0..4]
+                .try_into()
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid header"))?,
+        ) as usize;
         let expected_len = 4 + num_ranges * 16;
         if data.len() < expected_len {
             return Err(std::io::Error::new(
@@ -129,8 +133,16 @@ impl FreeSpaceManager {
         let fsm = Self::new();
         for i in 0..num_ranges {
             let offset = 4 + i * 16;
-            let start_page_idx = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-            let num_pages = u64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap());
+            let start_page_idx = u64::from_le_bytes(
+                data[offset..offset + 8]
+                    .try_into()
+                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid start page idx"))?,
+            );
+            let num_pages = u64::from_le_bytes(
+                data[offset + 8..offset + 16]
+                    .try_into()
+                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid num pages"))?,
+            );
             fsm.add_free_pages(PageRange::new(start_page_idx, num_pages));
         }
         Ok(fsm)
@@ -156,7 +168,7 @@ impl FreeSpaceManager {
         assert!(entry.num_pages > 0);
         let level = Self::get_level(entry.num_pages);
         let list_lock = self.get_free_list(level);
-        let mut list = list_lock.write().unwrap();
+        let mut list = list_lock.write().unwrap_or_else(|e| e.into_inner());
         assert!(!list.contains(&entry), "duplicate free page range");
         list.insert(entry);
         self.num_entries.fetch_add(1, Ordering::SeqCst);
@@ -180,7 +192,7 @@ impl FreeSpaceManager {
         let level_to_search = Self::get_level(num_pages);
         for level in level_to_search..self.free_lists.len() {
             let entry = {
-                let list = self.free_lists[level].read().unwrap();
+                let list = self.free_lists[level].read().unwrap_or_else(|e| e.into_inner());
                 // Find the first entry with num_pages >= requested
                 let probe = PageRange::new(0, num_pages);
                 if let Some(found) = list.range(probe..).next() {
@@ -192,7 +204,7 @@ impl FreeSpaceManager {
 
             // Remove the entry
             {
-                let mut list = self.free_lists[level].write().unwrap();
+                let mut list = self.free_lists[level].write().unwrap_or_else(|e| e.into_inner());
                 list.remove(&entry);
             }
             self.num_entries.fetch_sub(1, Ordering::SeqCst);
@@ -220,17 +232,17 @@ impl FreeSpaceManager {
 
     /// Add pages that are freed but not yet reusable until checkpoint.
     pub fn add_uncheckpointed_free_pages(&self, entry: PageRange) {
-        self.uncheckpointed_free_page_ranges.write().unwrap().push(entry);
+        self.uncheckpointed_free_page_ranges.write().unwrap_or_else(|e| e.into_inner()).push(entry);
     }
 
     /// Roll back an incomplete checkpoint — discard uncheckpointed entries.
     pub fn rollback_checkpoint(&self) {
-        self.uncheckpointed_free_page_ranges.write().unwrap().clear();
+        self.uncheckpointed_free_page_ranges.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     /// Finalize checkpoint — move uncheckpointed entries into the main free lists.
     pub fn finalize_checkpoint(&self) {
-        let entries = std::mem::take(&mut *self.uncheckpointed_free_page_ranges.write().unwrap());
+        let entries = std::mem::take(&mut *self.uncheckpointed_free_page_ranges.write().unwrap_or_else(|e| e.into_inner()));
         for entry in entries {
             self.add_free_pages(entry);
         }
@@ -245,7 +257,7 @@ impl FreeSpaceManager {
     pub fn total_free_pages(&self) -> u64 {
         self.free_lists
             .iter()
-            .map(|list_lock| list_lock.read().unwrap().iter().map(|r| r.num_pages).sum::<u64>())
+            .map(|list_lock| list_lock.read().unwrap_or_else(|e| e.into_inner()).iter().map(|r| r.num_pages).sum::<u64>())
             .sum()
     }
 }

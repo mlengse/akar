@@ -331,13 +331,19 @@ impl VectorIndexTable {
             let mut loaded_this_page = 0u64;
 
             while loaded_this_page < remaining && pos + 8 <= capacity {
-                let id = u64::from_le_bytes(page_data[pos..pos + 8].try_into().unwrap()) as usize;
+                let id = match page_data.get(pos..pos + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u64::from_le_bytes(b) as usize,
+                    None => break,
+                };
                 pos += 8;
 
                 if pos + 4 > capacity {
                     break;
                 }
-                let vec_len = u32::from_le_bytes(page_data[pos..pos + 4].try_into().unwrap()) as usize;
+                let vec_len = match page_data.get(pos..pos + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u32::from_le_bytes(b) as usize,
+                    None => break,
+                };
                 pos += 4;
 
                 if pos + vec_len > capacity {
@@ -351,7 +357,10 @@ impl VectorIndexTable {
                 let dims = vec_len / 4;
                 let mut vec_data = Vec::with_capacity(dims);
                 for i in 0..dims {
-                    let f = f32::from_le_bytes(page_data[pos + i * 4..pos + (i + 1) * 4].try_into().unwrap());
+                    let f = match page_data.get(pos + i * 4..pos + (i + 1) * 4).and_then(|s| s.try_into().ok()) {
+                        Some(b) => f32::from_le_bytes(b),
+                        None => break,
+                    };
                     vec_data.push(f);
                 }
                 pos += vec_len;

@@ -47,7 +47,7 @@ pub struct UpdateInfo {
 
 impl Clone for UpdateInfo {
     fn clone(&self) -> Self {
-        let vectors = self.vectors.lock().unwrap().clone();
+        let vectors = self.vectors.lock().unwrap_or_else(|e| e.into_inner()).clone();
         Self {
             vectors: Mutex::new(vectors),
             vector_size: self.vector_size,
@@ -77,7 +77,7 @@ impl UpdateInfo {
     /// `data` is the serialized old data being replaced (for undo).
     pub fn append_update(&self, row: u32, version: u64, data: Vec<u8>) {
         let v_idx = self.vector_idx(row);
-        let mut vectors = self.vectors.lock().unwrap();
+        let mut vectors = self.vectors.lock().unwrap_or_else(|e| e.into_inner());
         if v_idx >= vectors.len() {
             vectors.resize(v_idx + 1, None);
         }
@@ -99,7 +99,7 @@ impl UpdateInfo {
     /// meaning the caller should use the base (latest) value.
     pub fn get_version(&self, row: u32, snapshot_ts: u64) -> Option<Vec<u8>> {
         let v_idx = self.vector_idx(row);
-        let vectors = self.vectors.lock().unwrap();
+        let vectors = self.vectors.lock().unwrap_or_else(|e| e.into_inner());
         if v_idx >= vectors.len() {
             return None;
         }
@@ -122,7 +122,7 @@ impl UpdateInfo {
     /// Used internally during commit to resolve the latest version.
     pub fn latest(&self, row: u32) -> Option<Vec<u8>> {
         let v_idx = self.vector_idx(row);
-        let vectors = self.vectors.lock().unwrap();
+        let vectors = self.vectors.lock().unwrap_or_else(|e| e.into_inner());
         vectors
             .get(v_idx)
             .as_ref()
@@ -131,7 +131,7 @@ impl UpdateInfo {
 
     /// Number of vectors with at least one update.
     pub fn num_dirty_vectors(&self) -> usize {
-        self.vectors.lock().unwrap().iter().filter(|v| v.is_some()).count()
+        self.vectors.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|v| v.is_some()).count()
     }
 }
 

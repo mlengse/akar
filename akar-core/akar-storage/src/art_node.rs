@@ -364,12 +364,14 @@ impl ArtNode {
     /// Get or insert a child node at the given byte.
     /// Returns a mutable reference to the child, creating a new empty Node4 if needed.
     pub fn get_or_insert_child(&mut self, byte: u8) -> &mut Box<ArtNode> {
-        if self.get_child(byte).is_some() {
-            return self.get_child_mut(byte).unwrap();
+        if self.get_child(byte).is_none() {
+            let new_child = Box::new(ArtNode::new_node4());
+            self.insert_child(byte, new_child);
         }
-        let new_child = Box::new(ArtNode::new_node4());
-        self.insert_child(byte, new_child);
-        self.get_child_mut(byte).unwrap()
+        match self.get_child_mut(byte) {
+            Some(c) => c,
+            None => unreachable!("child must exist after insertion"),
+        }
     }
 
     /// Remove a child by byte. Does not shrink the node.

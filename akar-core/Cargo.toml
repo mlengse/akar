@@ -81,6 +81,7 @@ type_complexity = "allow"
 collapsible_match = "allow"
 collapsible_if = "allow"
 cloned_ref_to_slice_refs = "allow"
+undocumented_unsafe_blocks = "warn"
 
 [profile.release]
 opt-level = 3

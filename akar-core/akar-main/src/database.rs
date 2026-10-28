@@ -127,11 +127,12 @@ struct PathLock {
 
 impl Drop for PathLock {
     fn drop(&mut self) {
-        let mut reg = process_path_locks().lock().unwrap();
-        if let Some((_, count)) = reg.get_mut(&self.key) {
-            *count -= 1;
-            if *count == 0 {
-                reg.remove(&self.key);
+        if let Ok(mut reg) = process_path_locks().lock() {
+            if let Some((_, count)) = reg.get_mut(&self.key) {
+                *count -= 1;
+                if *count == 0 {
+                    reg.remove(&self.key);
+                }
             }
         }
     }
@@ -694,7 +695,9 @@ impl Database {
             std::fs::create_dir_all(&db_path)
                 .map_err(|e| format!("Failed to create database directory '{}': {e}", db_path.display()))?;
             let key = lock_key(&db_path);
-            let mut reg = process_path_locks().lock().unwrap();
+            let mut reg = process_path_locks()
+                .lock()
+                .map_err(|e| format!("Failed to acquire process path locks: {e}"))?;
             match reg.get_mut(&key) {
                 // Already open in this process: share the held OS lock.
                 Some((_, count)) => {

@@ -93,9 +93,8 @@ pub fn en_stem_analyzer() -> TextAnalyzer {
 /// [`NgramTokenizer`] property — so phrase queries do not apply to CJK fields.
 pub fn cjk_analyzer() -> TextAnalyzer {
     // min_gram=1, max_gram=2 is a valid NgramTokenizer configuration by
-    // construction (min_gram > 0 and min_gram <= max_gram), so the error branch
-    // of NgramTokenizer::new is unreachable for these constants.
-    let ngram = NgramTokenizer::all_ngrams(1, 2).expect("NgramTokenizer(1, 2) is always a valid configuration");
+    // construction (min_gram > 0 and min_gram <= max_gram).
+    let ngram = NgramTokenizer::all_ngrams(1, 2).unwrap_or_default();
     TextAnalyzer::builder(ngram).filter(LowerCaser).build()
 }
 

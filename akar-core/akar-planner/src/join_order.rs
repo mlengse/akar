@@ -53,7 +53,9 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
         if let Some(filter) = filter_expr {
             push_single_var_predicates(&mut scans, &filter.expression);
         }
-        return JoinPlan::Leaf(scans.into_iter().next().unwrap());
+        if let Some(scan) = scans.pop() {
+            return JoinPlan::Leaf(scan);
+        }
     }
 
     if let Some(filter) = filter_expr {
@@ -67,7 +69,17 @@ pub fn build_join_tree(scans: Vec<LogicalOperator>, filter_expr: Option<&BoundEx
 
     // Greedy join ordering: start with the first scan, then join each subsequent one
     let mut scans_iter = scans.into_iter();
-    let first = scans_iter.next().unwrap();
+    let first = scans_iter.next().unwrap_or_else(|| {
+        LogicalOperator::ScanNode(LogicalScanNode {
+            table_name: "empty".into(),
+            table_id: 0,
+            alias: None,
+            columns: Vec::new(),
+            cardinality: 0,
+            fts_query: None,
+            predicate: None,
+        })
+    });
     let mut result = JoinPlan::Leaf(first);
 
     for scan in scans_iter {

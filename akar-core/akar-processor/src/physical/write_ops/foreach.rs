@@ -3,6 +3,7 @@ use crate::physical::common::store_value_in_vector;
 use crate::physical::scan_filter::PhysicalScan;
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::ast_constant_to_value;
+use akar_common::error::ProcessorError;
 use akar_common::types::Value;
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::Expression;
@@ -71,11 +72,23 @@ impl PhysicalOperatorExec for PhysicalForeach {
 
                 // Execute the sub-plan using the QueryProcessor-like pipeline
                 // Use the processor module directly from the same crate
+                let func_reg = self
+                    .function_registry
+                    .clone()
+                    .ok_or_else(|| ProcessorError::Execution("Missing function registry in FOREACH".into()))?;
+                let table_cat = self
+                    .table_catalog
+                    .clone()
+                    .ok_or_else(|| ProcessorError::Execution("Missing table catalog in FOREACH".into()))?;
+                let vfs = self
+                    .vfs
+                    .clone()
+                    .ok_or_else(|| ProcessorError::Execution("Missing VFS in FOREACH".into()))?;
                 let processor = crate::processor::QueryProcessor::with_catalog(
-                    self.function_registry.clone().unwrap(),
-                    self.table_catalog.clone().unwrap(),
+                    func_reg,
+                    table_cat,
                     None,
-                    self.vfs.clone().unwrap(),
+                    vfs,
                 );
                 let _result = processor.execute(sub_plan)?;
             }

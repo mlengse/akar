@@ -895,9 +895,9 @@ impl JoinHashTable {
 }
 
 /// Concatenate the same column across chunks into one Arrow array.
-fn concat_parts(parts: Vec<ArrayRef>) -> Result<ArrayRef, String> {
+fn concat_parts(mut parts: Vec<ArrayRef>) -> Result<ArrayRef, String> {
     if parts.len() == 1 {
-        Ok(parts.into_iter().next().unwrap())
+        parts.pop().ok_or_else(|| "Empty parts list".into())
     } else {
         let refs: Vec<&dyn arrow::array::Array> = parts.iter().map(|a| a.as_ref()).collect();
         arrow::compute::concat(&refs).map_err(|e| e.to_string())

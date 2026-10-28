@@ -329,12 +329,16 @@ pub fn map_and_execute_update(
             Ok(result)
         }
         LogicalOperator::Insert(i) => {
+            let table_catalog = ctx
+                .table_catalog
+                .clone()
+                .ok_or_else(|| ProcessorError::Execution("Missing table catalog in Insert".into()))?;
             let exec = crate::physical::misc::PhysicalInsert {
                 table_name: i.table_name.clone(),
                 table_id: i.table_id,
                 columns: i.columns.clone(),
                 values: i.values.clone(),
-                table_catalog: ctx.table_catalog.clone().unwrap(),
+                table_catalog,
                 txn_id: ctx.txn_id,
                 undo_sink: Some(ctx.processor.undo_sink()),
                 wal_sink: Some(ctx.processor.wal_sink()),

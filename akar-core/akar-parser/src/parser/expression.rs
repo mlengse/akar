@@ -185,7 +185,12 @@ pub fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression,
             let mut result = parse_expression(children.next().ok_or("Empty postfix")?)?;
             for child in children {
                 if child.as_rule() == Rule::property_access {
-                    let prop = child.into_inner().next().unwrap().as_str().to_string();
+                    let prop = child
+                        .into_inner()
+                        .next()
+                        .ok_or("Empty property access identifier")?
+                        .as_str()
+                        .to_string();
                     result = Expression::PropertyAccess(Box::new(result), prop);
                 } else if child.as_rule() == Rule::expression {
                     // List subscript `lst[i]` (Cypher 0-based). `[` `]` are

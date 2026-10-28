@@ -620,7 +620,13 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len = u32::from_le_bytes(record_data[9..13].try_into().unwrap()) as usize;
+                        let data_len = match record_data.get(9..13).and_then(|s| s.try_into().ok()) {
+                            Some(b) => u32::from_le_bytes(b) as usize,
+                            None => {
+                                skipped += 1;
+                                break;
+                            }
+                        };
                         1 + 8 + 4 + data_len // tag + u64 + u32 + data
                     }
                     b'D' => 1 + 8 + 8, // tag + table_id + row_id
@@ -630,7 +636,13 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len = u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
+                        let data_len = match record_data.get(21..25).and_then(|s| s.try_into().ok()) {
+                            Some(b) => u32::from_le_bytes(b) as usize,
+                            None => {
+                                skipped += 1;
+                                break;
+                            }
+                        };
                         1 + 8 + 8 + 4 + 4 + data_len
                     }
                     b'F' => 1 + 8 + 1, // tag + page_idx + is_free
@@ -640,7 +652,13 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len = u32::from_le_bytes(record_data[21..25].try_into().unwrap()) as usize;
+                        let data_len = match record_data.get(21..25).and_then(|s| s.try_into().ok()) {
+                            Some(b) => u32::from_le_bytes(b) as usize,
+                            None => {
+                                skipped += 1;
+                                break;
+                            }
+                        };
                         1 + 8 + 4 + 8 + 4 + data_len
                     }
                     b'L' => {
@@ -648,7 +666,13 @@ impl WAL {
                             skipped += 1;
                             break;
                         }
-                        let data_len = u32::from_le_bytes(record_data[1..5].try_into().unwrap()) as usize;
+                        let data_len = match record_data.get(1..5).and_then(|s| s.try_into().ok()) {
+                            Some(b) => u32::from_le_bytes(b) as usize,
+                            None => {
+                                skipped += 1;
+                                break;
+                            }
+                        };
                         1 + 4 + data_len
                     }
                     b'C' => 1 + 8, // tag + transaction_id

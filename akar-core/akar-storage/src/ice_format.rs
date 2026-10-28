@@ -58,7 +58,11 @@ impl IceDiskRelTable {
         vfs: &VirtualFileSystemRegistry,
         columns: &[CatalogColumn],
     ) -> Result<IceDiskRelTableScanState, ParquetReaderError> {
-        let stream = stream_parquet(self.indices_file_path.to_str().unwrap(), vfs, columns)?;
+        let path_str = self
+            .indices_file_path
+            .to_str()
+            .ok_or_else(|| ParquetReaderError::ParquetError("Invalid UTF-8 in path".into()))?;
+        let stream = stream_parquet(path_str, vfs, columns)?;
         Ok(IceDiskRelTableScanState {
             stream,
             current_batch: Vec::new(),
@@ -73,7 +77,10 @@ impl IceDiskRelTable {
         columns: &[CatalogColumn],
     ) -> Result<Vec<Vec<Value>>, ParquetReaderError> {
         if let Some(path) = &self.indptr_file_path {
-            read_parquet(path.to_str().unwrap(), vfs, columns)
+            let path_str = path
+                .to_str()
+                .ok_or_else(|| ParquetReaderError::ParquetError("Invalid UTF-8 in path".into()))?;
+            read_parquet(path_str, vfs, columns)
         } else {
             Ok(vec![])
         }

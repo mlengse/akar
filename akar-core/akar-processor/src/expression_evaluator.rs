@@ -459,7 +459,9 @@ impl ExpressionEvaluator {
                                 None => m,
                             });
                         }
-                        return Ok(ArrowVector::new(Arc::new(acc.unwrap()), PhysicalTypeID::Bool));
+                        if let Some(final_acc) = acc {
+                            return Ok(ArrowVector::new(Arc::new(final_acc), PhysicalTypeID::Bool));
+                        }
                     }
                 }
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;
@@ -494,10 +496,11 @@ impl ExpressionEvaluator {
                                 None => m,
                             });
                         }
-                        let all_null = acc.unwrap();
-                        let not_all = arrow::compute::kernels::boolean::not(&all_null)
-                            .map_err(|e| format!("Arrow is_not_null over variable failed: {e}"))?;
-                        return Ok(ArrowVector::new(Arc::new(not_all), PhysicalTypeID::Bool));
+                        if let Some(all_null) = acc {
+                            let not_all = arrow::compute::kernels::boolean::not(&all_null)
+                                .map_err(|e| format!("Arrow is_not_null over variable failed: {e}"))?;
+                            return Ok(ArrowVector::new(Arc::new(not_all), PhysicalTypeID::Bool));
+                        }
                     }
                 }
                 let inner_arrow = self.evaluate_arrow(inner, chunk)?;

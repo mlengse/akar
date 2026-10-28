@@ -253,17 +253,19 @@ impl Deref for PooledConnection<'_> {
     fn deref(&self) -> &Connection {
         // `connection` is only taken in `Drop`, so it is present for the whole
         // lifetime of a live guard.
-        self.connection
-            .as_ref()
-            .expect("pooled connection is present until dropped")
+        match &self.connection {
+            Some(conn) => conn,
+            None => unreachable!("pooled connection is present until dropped"),
+        }
     }
 }
 
 impl DerefMut for PooledConnection<'_> {
     fn deref_mut(&mut self) -> &mut Connection {
-        self.connection
-            .as_mut()
-            .expect("pooled connection is present until dropped")
+        match &mut self.connection {
+            Some(conn) => conn,
+            None => unreachable!("pooled connection is present until dropped"),
+        }
     }
 }
 

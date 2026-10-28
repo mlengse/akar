@@ -405,12 +405,14 @@ fn split_by_radix(chunks: &[DataChunk], key_col: usize, partitions: usize) -> Ve
         .collect()
 }
 
-fn concat_or_first(parts: Vec<ArrayRef>) -> ArrayRef {
+fn concat_or_first(mut parts: Vec<ArrayRef>) -> ArrayRef {
     if parts.len() == 1 {
-        return parts.into_iter().next().unwrap();
+        return parts.pop().unwrap_or_else(|| Arc::new(arrow::array::NullArray::new(0)));
     }
     let refs: Vec<&dyn Array> = parts.iter().map(|a| a.as_ref()).collect();
-    arrow::compute::concat(&refs).unwrap_or_else(|_| parts[0].clone())
+    arrow::compute::concat(&refs).unwrap_or_else(|_| {
+        parts.first().cloned().unwrap_or_else(|| Arc::new(arrow::array::NullArray::new(0)))
+    })
 }
 
 /// Write a partition to an Arrow IPC file.

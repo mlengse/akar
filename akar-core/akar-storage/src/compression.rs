@@ -145,7 +145,10 @@ fn decompress_integer_bitpacking(data: &[u8], expected_size: usize) -> Vec<u8> {
         return Vec::new();
     }
     let value_size = data[0] as usize;
-    let num_values = u32::from_le_bytes(data[1..5].try_into().unwrap()) as usize;
+    let num_values = match data.get(1..5).and_then(|s| s.try_into().ok()) {
+        Some(b) => u32::from_le_bytes(b) as usize,
+        None => return Vec::new(),
+    };
     let mut result = Vec::with_capacity(expected_size.max(num_values * value_size));
     let mut offset = 5;
 
@@ -196,7 +199,9 @@ pub fn compress_float(data: &[u8], num_values: usize, value_size: usize) -> Comp
             if offset + 4 > data.len() {
                 break;
             }
-            ints_u32.push(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()));
+            if let Some(b) = data.get(offset..offset + 4).and_then(|s| s.try_into().ok()) {
+                ints_u32.push(u32::from_le_bytes(b));
+            }
             offset += 4;
         }
     } else {
@@ -206,7 +211,9 @@ pub fn compress_float(data: &[u8], num_values: usize, value_size: usize) -> Comp
             if offset + 8 > data.len() {
                 break;
             }
-            ints_u64.push(u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()));
+            if let Some(b) = data.get(offset..offset + 8).and_then(|s| s.try_into().ok()) {
+                ints_u64.push(u64::from_le_bytes(b));
+            }
             offset += 8;
         }
     }
@@ -270,10 +277,10 @@ pub fn compress_float(data: &[u8], num_values: usize, value_size: usize) -> Comp
     } else if min_len == offset_payload_len {
         compressed.push(FloatCompressionStrategy::Offset as u8);
         if value_size == 4 {
-            let min_val = *ints_u32.iter().min().unwrap();
+            let min_val = ints_u32.iter().copied().min().unwrap_or(0);
             compressed.extend_from_slice(&min_val.to_le_bytes());
         } else {
-            let min_val = *ints_u64.iter().min().unwrap();
+            let min_val = ints_u64.iter().copied().min().unwrap_or(0);
             compressed.extend_from_slice(&min_val.to_le_bytes());
         }
         if offset_chunk.data.len() >= 5 {
@@ -313,7 +320,10 @@ fn decompress_float(data: &[u8], expected_size: usize) -> Vec<u8> {
         return Vec::new();
     }
     let value_size = data[0] as usize;
-    let num_values = u32::from_le_bytes(data[1..5].try_into().unwrap()) as usize;
+    let num_values = match data.get(1..5).and_then(|s| s.try_into().ok()) {
+        Some(b) => u32::from_le_bytes(b) as usize,
+        None => return Vec::new(),
+    };
     let strategy = data[5];
     let expected = expected_size.max(num_values * value_size);
 
@@ -342,22 +352,34 @@ fn decompress_float(data: &[u8], expected_size: usize) -> Vec<u8> {
         let unpacked = decompress_integer_bitpacking(&int_pack_data, num_values * value_size);
         let mut result = vec![0u8; expected];
         if value_size == 4 {
-            let min_val = u32::from_le_bytes(min_val_bytes.try_into().unwrap());
+            let min_val = match min_val_bytes.try_into() {
+                Ok(b) => u32::from_le_bytes(b),
+                Err(_) => return Vec::new(),
+            };
             for i in 0..num_values {
                 if i * 4 + 4 > unpacked.len() {
                     break;
                 }
-                let diff = u32::from_le_bytes(unpacked[i * 4..i * 4 + 4].try_into().unwrap());
+                let diff = match unpacked.get(i * 4..i * 4 + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u32::from_le_bytes(b),
+                    None => break,
+                };
                 let val = diff.wrapping_add(min_val);
                 result[i * 4..i * 4 + 4].copy_from_slice(&val.to_le_bytes());
             }
         } else {
-            let min_val = u64::from_le_bytes(min_val_bytes.try_into().unwrap());
+            let min_val = match min_val_bytes.try_into() {
+                Ok(b) => u64::from_le_bytes(b),
+                Err(_) => return Vec::new(),
+            };
             for i in 0..num_values {
                 if i * 8 + 8 > unpacked.len() {
                     break;
                 }
-                let diff = u64::from_le_bytes(unpacked[i * 8..i * 8 + 8].try_into().unwrap());
+                let diff = match unpacked.get(i * 8..i * 8 + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u64::from_le_bytes(b),
+                    None => break,
+                };
                 let val = diff.wrapping_add(min_val);
                 result[i * 8..i * 8 + 8].copy_from_slice(&val.to_le_bytes());
             }
@@ -376,7 +398,10 @@ fn decompress_float(data: &[u8], expected_size: usize) -> Vec<u8> {
                 if i * 4 + 4 > unpacked.len() {
                     break;
                 }
-                let diff = u32::from_le_bytes(unpacked[i * 4..i * 4 + 4].try_into().unwrap());
+                let diff = match unpacked.get(i * 4..i * 4 + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u32::from_le_bytes(b),
+                    None => break,
+                };
                 let val = if i == 0 { diff } else { prev.wrapping_add(diff) };
                 result[i * 4..i * 4 + 4].copy_from_slice(&val.to_le_bytes());
                 prev = val;
@@ -387,7 +412,10 @@ fn decompress_float(data: &[u8], expected_size: usize) -> Vec<u8> {
                 if i * 8 + 8 > unpacked.len() {
                     break;
                 }
-                let diff = u64::from_le_bytes(unpacked[i * 8..i * 8 + 8].try_into().unwrap());
+                let diff = match unpacked.get(i * 8..i * 8 + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u64::from_le_bytes(b),
+                    None => break,
+                };
                 let val = if i == 0 { diff } else { prev.wrapping_add(diff) };
                 result[i * 8..i * 8 + 8].copy_from_slice(&val.to_le_bytes());
                 prev = val;

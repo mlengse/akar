@@ -174,7 +174,7 @@ impl NodeTable {
 
         // Get or create the current node group.
         let num_cols = self.columns.len();
-        if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
+        if self.node_groups.is_empty() || self.node_groups.last().is_some_and(|ng| ng.is_full()) {
             let start_offset = self.num_rows;
             let mut new_group = NodeGroup::new(num_cols, start_offset);
             // Enable version info if MVCC tracking is requested
@@ -187,7 +187,9 @@ impl NodeTable {
             self.node_groups.push(new_group);
         }
 
-        let current = self.node_groups.last_mut().unwrap();
+        let current = self.node_groups.last_mut().ok_or_else(|| {
+            StorageError::LocalStorage("expected active node group".to_string())
+        })?;
         // Enable version info on existing group if needed
         if txn_id.is_some() {
             current.enable_version_info();
@@ -283,7 +285,7 @@ impl NodeTable {
         let rows: &[Vec<Value>] = &coerced_rows;
 
         // Ensure we have a node group with enough capacity
-        if self.node_groups.is_empty() || self.node_groups.last().unwrap().is_full() {
+        if self.node_groups.is_empty() || self.node_groups.last().is_some_and(|ng| ng.is_full()) {
             let off = if self.node_groups.is_empty() {
                 start_offset
             } else {
@@ -302,7 +304,9 @@ impl NodeTable {
         // Append to the last group (spilling into new groups if needed)
         let mut inserted = 0usize;
         while inserted < total_new {
-            let current = self.node_groups.last_mut().unwrap();
+            let current = self.node_groups.last_mut().ok_or_else(|| {
+                StorageError::LocalStorage("expected active node group".to_string())
+            })?;
             if txn_id.is_some() {
                 current.enable_version_info();
             }

@@ -184,8 +184,14 @@ pub fn map_and_execute_ddl(
                             return Err(format!("Column '{}' already exists in '{}'", new_name, a.table_name).into());
                         }
                     }
-                    let mut table = tc.get_node_table_by_name_mut(&a.table_name).unwrap();
-                    let col = table.columns.iter_mut().find(|c| c.name == *old_name).unwrap();
+                    let mut table = tc
+                        .get_node_table_by_name_mut(&a.table_name)
+                        .ok_or_else(|| format!("Table '{}' not found", a.table_name))?;
+                    let col = table
+                        .columns
+                        .iter_mut()
+                        .find(|c| c.name == *old_name)
+                        .ok_or_else(|| format!("Column '{}' not found in '{}'", old_name, a.table_name))?;
                     col.name = new_name.clone();
                     tracing::info!(
                         "Pipeline: Renamed column '{}' to '{}' in '{}'",
@@ -464,8 +470,7 @@ pub fn map_and_execute_ddl(
 fn ddl_success_chunk(message: &str) -> Vec<DataChunk> {
     let mut v = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::String, 1);
     v.resize(1);
-    v.set_value(0, &akar_common::types::Value::String(message.to_string()))
-        .unwrap();
+    let _ = v.set_value(0, &akar_common::types::Value::String(message.to_string()));
     let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&v).array;
     let mut chunk = DataChunk::new(vec![arr], vec![akar_common::types::PhysicalTypeID::String]);
     chunk.size = 1;

@@ -230,7 +230,7 @@ impl StorageManager {
 
     /// The currently attached spiller (if any).
     pub fn spiller(&self) -> Option<Arc<Spiller>> {
-        self.spiller.read().unwrap().clone()
+        self.spiller.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Enable (or disable) group commit at the WAL durability boundary (G6).
@@ -292,7 +292,7 @@ impl StorageManager {
         if self.db_path.to_string_lossy() == ":memory:" {
             return Ok(()); // In-memory databases have nothing to persist
         }
-        let page_size = self.buffer_manager.lock().unwrap().page_size();
+        let page_size = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner()).page_size();
         self.table_persistence
             .persist_all(&self.table_catalog, &self.db_path, &self.buffer_manager, page_size)
     }
@@ -305,7 +305,7 @@ impl StorageManager {
         if self.db_path.to_string_lossy() == ":memory:" {
             return Ok(0); // In-memory databases have no persisted mirrors
         }
-        let page_size = self.buffer_manager.lock().unwrap().page_size();
+        let page_size = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner()).page_size();
         self.table_persistence
             .load_all(&self.table_catalog, &self.db_path, &self.buffer_manager, page_size)
     }
@@ -318,7 +318,7 @@ impl StorageManager {
 
     /// Log a column write to the WAL before applying it to the BufferManager.
     pub fn log_column_write(&self, table_id: u64, col_id: u32, page_id: u64, data: &[u8]) {
-        let mut wal = self.wal.lock().unwrap();
+        let mut wal = self.wal.lock().unwrap_or_else(|e| e.into_inner());
         wal.log_column_write(table_id, col_id, page_id, data);
     }
 
@@ -356,7 +356,7 @@ impl StorageManager {
 
         if let Some(index_name) = index_name {
             // Register the index file with the BufferManager for persistence
-            let mut bm = self.buffer_manager.lock().unwrap();
+            let mut bm = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner());
             let full_path = self.db_path.join(format!("{index_name}.art"));
             if !bm.is_file_registered(index_name) {
                 bm.register_file(index_name, full_path);
@@ -397,7 +397,7 @@ impl StorageManager {
             .create_vector_index(name, table_name, column_name, metric, dimensions);
 
         // Register the index file with the BufferManager
-        let mut bm = self.buffer_manager.lock().unwrap();
+        let mut bm = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner());
         table.register_file(&mut bm, &self.db_path);
 
         table
@@ -421,7 +421,7 @@ impl StorageManager {
                 .create_vector_index_with_id(index_id, name, table_name, column_name, metric, dimensions);
 
         // Register the index file with the BufferManager
-        let mut bm = self.buffer_manager.lock().unwrap();
+        let mut bm = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner());
         table.register_file(&mut bm, &self.db_path);
 
         table
@@ -715,7 +715,7 @@ impl StorageManager {
 
     /// Get the total size of the WAL in bytes.
     pub fn wal_size(&self) -> usize {
-        self.wal.lock().unwrap().total_size()
+        self.wal.lock().unwrap_or_else(|e| e.into_inner()).total_size()
     }
 
     /// Perform a checkpoint: flush WAL + dirty pages to disk.
@@ -822,7 +822,7 @@ impl StorageManager {
 
     /// Buffer manager statistics for CALL bm_info().
     pub fn buffer_info(&self) -> BufferInfo {
-        let bm = self.buffer_manager.lock().unwrap();
+        let bm = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner());
         let stats = bm.stats();
         let page_size = bm.page_size();
         BufferInfo {

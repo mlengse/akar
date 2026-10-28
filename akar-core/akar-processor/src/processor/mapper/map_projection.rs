@@ -333,7 +333,11 @@ pub fn map_and_execute_projection(
                         let mut all: Option<Vec<usize>> = Some(Vec::new());
                         for be in &p.expressions {
                             match resolve_projection_column_expand(&be.expression, first_chunk) {
-                                Some(idxs) => all.as_mut().expect("all is Some").extend(idxs),
+                                Some(idxs) => {
+                                    if let Some(ref mut a) = all {
+                                        a.extend(idxs);
+                                    }
+                                }
                                 None => {
                                     all = None;
                                     break;

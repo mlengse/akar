@@ -162,14 +162,14 @@ impl<'p> ExecutionContext<'p> {
                     // Concatenate per-group arrays into one array per column
                     let mut concat_arrays: Vec<ArrayRef> = column_arrays
                         .into_iter()
-                        .map(|group_arrays| {
+                        .map(|mut group_arrays| {
                             if group_arrays.len() == 1 {
-                                group_arrays.into_iter().next().unwrap()
+                                group_arrays.pop().unwrap_or_else(|| std::sync::Arc::new(arrow::array::NullArray::new(0)))
                             } else {
                                 let refs: Vec<&dyn arrow::array::Array> =
                                     group_arrays.iter().map(|a| a.as_ref()).collect();
                                 arrow::compute::concat(&refs)
-                                    .unwrap_or_else(|_| group_arrays.into_iter().next().unwrap())
+                                    .unwrap_or_else(|_| group_arrays.pop().unwrap_or_else(|| std::sync::Arc::new(arrow::array::NullArray::new(0))))
                             }
                         })
                         .collect();

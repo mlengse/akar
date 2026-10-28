@@ -466,8 +466,19 @@ impl<K: IndexKey + Hash + Eq> OnDiskHashIndex<K> {
             current_page = collision_next as u64;
             let next_frame = bm.pin(&self.file_name, current_page)?;
             let next_data = &next_frame.data;
-            num_entries = u32::from_le_bytes(next_data[4..8].try_into().unwrap());
-            collision_next = u32::from_le_bytes(next_data[8..12].try_into().unwrap());
+            let err = || std::io::Error::new(std::io::ErrorKind::InvalidData, "Corrupted index collision page");
+            num_entries = u32::from_le_bytes(
+                next_data
+                    .get(4..8)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(err)?,
+            );
+            collision_next = u32::from_le_bytes(
+                next_data
+                    .get(8..12)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(err)?,
+            );
             bm.unpin(&self.file_name, current_page);
         }
 

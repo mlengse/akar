@@ -411,7 +411,9 @@ impl BufferManager {
                     continue;
                 }
                 if frame.clock_ref {
-                    self.frames.get_mut(&k).unwrap().clock_ref = false;
+                    if let Some(frame_mut) = self.frames.get_mut(&k) {
+                        frame_mut.clock_ref = false;
+                    }
                     self.clock_hand += 1;
                     continue;
                 }

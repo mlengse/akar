@@ -242,40 +242,73 @@ fn compute_values(count: usize, dtype: &NpyDtype, elem_size: usize, raw: &[u8]) 
         let offset = i * elem_size;
         let val = match dtype {
             NpyDtype::Float64 => {
-                let bytes: [u8; 8] = raw[offset..offset + 8].try_into().unwrap();
+                let bytes: [u8; 8] = match raw.get(offset..offset + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::Double(f64::from_le_bytes(bytes))
             }
             NpyDtype::Float32 => {
-                let bytes: [u8; 4] = raw[offset..offset + 4].try_into().unwrap();
+                let bytes: [u8; 4] = match raw.get(offset..offset + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::Float(f32::from_le_bytes(bytes))
             }
             NpyDtype::Int64 => {
-                let bytes: [u8; 8] = raw[offset..offset + 8].try_into().unwrap();
+                let bytes: [u8; 8] = match raw.get(offset..offset + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::Int64(i64::from_le_bytes(bytes))
             }
             NpyDtype::Int32 => {
-                let bytes: [u8; 4] = raw[offset..offset + 4].try_into().unwrap();
+                let bytes: [u8; 4] = match raw.get(offset..offset + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::Int32(i32::from_le_bytes(bytes))
             }
             NpyDtype::Int16 => {
-                let bytes: [u8; 2] = raw[offset..offset + 2].try_into().unwrap();
+                let bytes: [u8; 2] = match raw.get(offset..offset + 2).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::Int16(i16::from_le_bytes(bytes))
             }
-            NpyDtype::Int8 => Value::Int8(raw[offset] as i8),
+            NpyDtype::Int8 => match raw.get(offset) {
+                Some(&b) => Value::Int8(b as i8),
+                None => break,
+            },
             NpyDtype::UInt64 => {
-                let bytes: [u8; 8] = raw[offset..offset + 8].try_into().unwrap();
+                let bytes: [u8; 8] = match raw.get(offset..offset + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::UInt64(u64::from_le_bytes(bytes))
             }
             NpyDtype::UInt32 => {
-                let bytes: [u8; 4] = raw[offset..offset + 4].try_into().unwrap();
+                let bytes: [u8; 4] = match raw.get(offset..offset + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::UInt32(u32::from_le_bytes(bytes))
             }
             NpyDtype::UInt16 => {
-                let bytes: [u8; 2] = raw[offset..offset + 2].try_into().unwrap();
+                let bytes: [u8; 2] = match raw.get(offset..offset + 2).and_then(|s| s.try_into().ok()) {
+                    Some(b) => b,
+                    None => break,
+                };
                 Value::UInt16(u16::from_le_bytes(bytes))
             }
-            NpyDtype::UInt8 => Value::UInt8(raw[offset]),
-            NpyDtype::Bool => Value::Bool(raw[offset] != 0),
+            NpyDtype::UInt8 => match raw.get(offset) {
+                Some(&b) => Value::UInt8(b),
+                None => break,
+            },
+            NpyDtype::Bool => match raw.get(offset) {
+                Some(&b) => Value::Bool(b != 0),
+                None => break,
+            },
             NpyDtype::String => Value::Null, // not implemented
         };
         values.push(val);

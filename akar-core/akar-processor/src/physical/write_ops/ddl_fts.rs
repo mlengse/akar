@@ -1,5 +1,6 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
+use akar_common::error::ProcessorError;
 use akar_common::types::{PhysicalTypeID, Value};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_storage::table::TableCatalog;
@@ -122,7 +123,7 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
                 0,
                 &Value::String(format!("FTS index '{}' built successfully.", self.index_name)),
             )
-            .unwrap();
+            .map_err(|e| ProcessorError::Execution(format!("Failed to set result value: {e}")))?;
         let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&result_vec).array;
         let mut result = DataChunk::new(vec![arr], vec![akar_common::types::PhysicalTypeID::String]);
         result.size = 1;

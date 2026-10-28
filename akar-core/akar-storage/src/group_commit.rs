@@ -167,7 +167,7 @@ impl<W: WalLike> GroupCommit<W> {
         let lsn = self.next_lsn.fetch_add(1, Ordering::Relaxed) + 1;
         let slot = new_slot();
         {
-            let mut queue = self.queue.lock().unwrap();
+            let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
             queue.push_back(PendingCommit {
                 lsn,
                 slot: slot.clone(),
@@ -181,7 +181,7 @@ impl<W: WalLike> GroupCommit<W> {
         }
         let deadline = Instant::now() + self.config.leader_timeout;
         let (lock, cvar) = &*slot;
-        let mut result = lock.lock().unwrap();
+        let mut result = lock.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             if let Some(outcome) = result.take() {
                 return match outcome {
@@ -196,10 +196,12 @@ impl<W: WalLike> GroupCommit<W> {
                 if let Ok(guard) = self.leader_lock.try_lock() {
                     self.run_leader(guard);
                 }
-                result = lock.lock().unwrap();
+                result = lock.lock().unwrap_or_else(|e| e.into_inner());
                 continue;
             }
-            let (guard, _to) = cvar.wait_timeout(result, Duration::from_millis(1)).unwrap();
+            let (guard, _to) = cvar
+                .wait_timeout(result, Duration::from_millis(1))
+                .unwrap_or_else(|e| e.into_inner());
             result = guard;
         }
     }
@@ -215,7 +217,7 @@ impl<W: WalLike> GroupCommit<W> {
 
         loop {
             let mut drained = {
-                let mut queue = self.queue.lock().unwrap();
+                let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
                 let mut v = Vec::with_capacity(queue.len());
                 while let Some(entry) = queue.pop_front() {
                     v.push(entry);
@@ -242,7 +244,7 @@ impl<W: WalLike> GroupCommit<W> {
         let io_result = self.wal.flush_to_disk();
 
         {
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
             stats.batches += 1;
             stats.commits += group_size as u64;
             stats.total_group_entries += group_size as u64;
@@ -258,7 +260,7 @@ impl<W: WalLike> GroupCommit<W> {
                 Err(e) => Err(io::Error::new(e.kind(), format!("group fsync failed: {e}"))),
             };
             let (lock, cvar) = &*entry.slot;
-            let mut slot = lock.lock().unwrap();
+            let mut slot = lock.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(outcome);
             drop(slot);
             cvar.notify_all();

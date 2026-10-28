@@ -117,21 +117,27 @@ impl TablePersistence {
         if buf.len() < 4 {
             return result;
         }
-        let file_cols = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
+        let file_cols = match buf.get(pos..pos + 4).and_then(|s| s.try_into().ok()) {
+            Some(b) => u32::from_le_bytes(b) as usize,
+            None => return result,
+        };
         pos += 4;
         for ci in 0..file_cols.min(num_cols) {
-            if pos + 4 > buf.len() {
-                break;
-            }
-            let count = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
+            let count = match buf.get(pos..pos + 4).and_then(|s| s.try_into().ok()) {
+                Some(b) => u32::from_le_bytes(b) as usize,
+                None => break,
+            };
             pos += 4;
             for _ in 0..count {
-                if pos + 12 > buf.len() {
-                    break;
-                }
-                let row = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
+                let row = match buf.get(pos..pos + 8).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u64::from_le_bytes(b),
+                    None => break,
+                };
                 pos += 8;
-                let len = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()) as usize;
+                let len = match buf.get(pos..pos + 4).and_then(|s| s.try_into().ok()) {
+                    Some(b) => u32::from_le_bytes(b) as usize,
+                    None => break,
+                };
                 pos += 4;
                 if pos + len > buf.len() {
                     break;
@@ -164,7 +170,7 @@ impl TablePersistence {
 
     /// Delete the mirror files for a dropped table.
     pub fn remove(&self, table_id: u64, db_path: &Path, bm: &Arc<Mutex<BufferManager>>) {
-        if let Some(state) = self.inner.lock().unwrap().remove(&table_id) {
+        if let Some(state) = self.inner.lock().unwrap_or_else(|e| e.into_inner()).remove(&table_id) {
             Self::drop_mirror_files(table_id, state.columns.len(), db_path, bm);
         }
     }
@@ -176,7 +182,7 @@ impl TablePersistence {
     /// the data and `.meta` files from disk.
     fn drop_mirror_files(table_id: u64, num_cols: usize, db_path: &Path, bm: &Arc<Mutex<BufferManager>>) {
         {
-            let mut guard = bm.lock().unwrap();
+            let mut guard = bm.lock().unwrap_or_else(|e| e.into_inner());
             for ci in 0..num_cols {
                 let fname = format!("col_{}_{}", table_id, ci);
                 guard.drop_file(&fname);
@@ -203,7 +209,7 @@ impl TablePersistence {
         page_size: usize,
     ) -> Result<(), StorageError> {
         let num_cols = table.columns.len();
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = state.entry(table.table_id).or_default();
 
         if !table.persistence_dirty && table.num_rows == entry.flushed_rows {
@@ -300,7 +306,7 @@ impl TablePersistence {
 
         table.load_persisted_rows(rows)?;
 
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         state.insert(
             table.table_id,
             TablePersistenceState {
@@ -340,7 +346,7 @@ impl TablePersistence {
     ) -> Result<(), StorageError> {
         let num_prop_cols = table.columns.len();
         let num_cols = num_prop_cols + 2;
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = state.entry(table.table_id).or_default();
 
         if !table.persistence_dirty && table.num_rows == entry.flushed_rows {
@@ -481,7 +487,7 @@ impl TablePersistence {
         table.num_rows = num_rows as u64;
         table.csr_index = None;
 
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         state.insert(
             table.table_id,
             TablePersistenceState {

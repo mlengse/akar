@@ -80,7 +80,7 @@ impl SharedAggregateState {
         let mut merged: ShardMap = hashbrown::HashMap::new();
 
         for shard in &self.shards {
-            let guard = shard.lock().unwrap();
+            let guard = shard.lock().unwrap_or_else(|e| e.into_inner());
             for (hash, bucket) in guard.iter() {
                 let mbucket = merged.entry(*hash).or_default();
                 for (key, states) in bucket {
@@ -347,7 +347,8 @@ impl PhysicalAggregateScan {
                                 }
                             })
                             .collect();
-                        arrow::compute::kernels::concat::concat(&refs).unwrap()
+                        arrow::compute::kernels::concat::concat(&refs)
+                            .unwrap_or_else(|_| arrow::array::new_null_array(&arrow::datatypes::DataType::Null, 0))
                     } else {
                         arrow::array::new_null_array(&arrow::datatypes::DataType::Null, 0)
                     }

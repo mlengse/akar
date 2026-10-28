@@ -333,18 +333,13 @@ impl Binder {
                     }
                 }
 
-                if !inline_exprs.is_empty() {
-                    let combined = inline_exprs
-                        .into_iter()
-                        .reduce(|acc, e| {
-                            akar_parser::ast::Expression::BinaryOp(
-                                akar_parser::ast::BinaryOp::And,
-                                Box::new(acc),
-                                Box::new(e),
-                            )
-                        })
-                        .unwrap();
-
+                if let Some(combined) = inline_exprs.into_iter().reduce(|acc, e| {
+                    akar_parser::ast::Expression::BinaryOp(
+                        akar_parser::ast::BinaryOp::And,
+                        Box::new(acc),
+                        Box::new(e),
+                    )
+                }) {
                     let bound_expr = self.resolve_expression(&combined, &variables)?;
                     clauses.push(BoundClause::BoundWhere(BoundWhereClause { expression: bound_expr }));
                 }

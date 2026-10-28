@@ -469,6 +469,20 @@ pub fn lock_or_poisoned<T>(mutex: &std::sync::Mutex<T>) -> crate::error::Result<
         .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
 }
 
+/// Acquire a read guard on an RwLock, converting poison errors into `AkarError::Transaction`.
+pub fn rwlock_read_or_poisoned<T>(rwlock: &std::sync::RwLock<T>) -> crate::error::Result<std::sync::RwLockReadGuard<'_, T>> {
+    rwlock
+        .read()
+        .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
+}
+
+/// Acquire a write guard on an RwLock, converting poison errors into `AkarError::Transaction`.
+pub fn rwlock_write_or_poisoned<T>(rwlock: &std::sync::RwLock<T>) -> crate::error::Result<std::sync::RwLockWriteGuard<'_, T>> {
+    rwlock
+        .write()
+        .map_err(|e| AkarError::Transaction(TransactionError::LockPoisoned(e.to_string())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,5 +516,13 @@ mod tests {
             }
             other => panic!("Expected TransactionError::LockPoisoned, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_rwlock_or_poisoned_ok() {
+        use std::sync::RwLock;
+        let rw = RwLock::new(42);
+        assert!(rwlock_read_or_poisoned(&rw).is_ok());
+        assert!(rwlock_write_or_poisoned(&rw).is_ok());
     }
 }

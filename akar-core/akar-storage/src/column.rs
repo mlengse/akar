@@ -152,7 +152,7 @@ impl Column {
 
         // Register the file with the buffer manager so it can manage its pages.
         {
-            let mut bm = buffer_manager.lock().unwrap();
+            let mut bm = buffer_manager.lock().unwrap_or_else(|e| e.into_inner());
             bm.register_file(&file_name, col_file_path.clone());
         }
 
@@ -196,7 +196,12 @@ impl Column {
         if self.num_pages > 0 {
             let last_page = self.num_pages - 1;
             let page_data = self.read_page_data(last_page as usize)?;
-            let num_vals = u32::from_le_bytes(page_data[..4].try_into().unwrap()) as usize;
+            let num_vals = u32::from_le_bytes(
+                page_data
+                    .get(..4)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupted page header"))?,
+            ) as usize;
             if num_vals >= MAX_VALS_PER_PAGE {
                 // Page has hit the max values limit; allocate a new one.
                 let new_page = self.allocate_new_page()?;
@@ -206,7 +211,12 @@ impl Column {
             let data_end = if num_vals > 0 {
                 let last_off_pos = 4 + (num_vals - 1) * 4;
                 PAGE_HEADER_SIZE
-                    + u32::from_le_bytes(page_data[last_off_pos..last_off_pos + 4].try_into().unwrap()) as usize
+                    + u32::from_le_bytes(
+                        page_data
+                            .get(last_off_pos..last_off_pos + 4)
+                            .and_then(|s| s.try_into().ok())
+                            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupted offset"))?,
+                    ) as usize
             } else {
                 PAGE_HEADER_SIZE
             };
@@ -326,18 +336,19 @@ impl Column {
             ));
         }
 
+        let err = || std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupted column metadata");
         let mut pos = 4;
-        let _version = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        let _version = u32::from_le_bytes(data.get(pos..pos + 4).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         pos += 4;
-        let _logical_type = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        let _logical_type = u32::from_le_bytes(data.get(pos..pos + 4).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         pos += 4;
-        let _table_id = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        let _table_id = u64::from_le_bytes(data.get(pos..pos + 8).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         pos += 8;
-        let _col_idx = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        let _col_idx = u32::from_le_bytes(data.get(pos..pos + 4).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         pos += 4;
-        self.num_values = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        self.num_values = u64::from_le_bytes(data.get(pos..pos + 8).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         pos += 8;
-        self.num_pages = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+        self.num_pages = u64::from_le_bytes(data.get(pos..pos + 8).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         pos += 8;
 
         let num_pages = self.num_pages as usize;
@@ -351,7 +362,7 @@ impl Column {
         self.page_row_offsets = Vec::with_capacity(num_pages);
         for _ in 0..num_pages {
             self.page_row_offsets
-                .push(u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap()));
+                .push(u64::from_le_bytes(data.get(pos..pos + 8).and_then(|s| s.try_into().ok()).ok_or_else(err)?));
             pos += 8;
         }
 
@@ -719,7 +730,13 @@ impl Column {
         let frame = bm.pin_mut(&self.file_name, page_idx)?;
         let page_size = self.file_handle.page_size;
 
-        let num_vals = u32::from_le_bytes(frame.data[..4].try_into().unwrap()) as usize;
+        let num_vals = u32::from_le_bytes(
+            frame
+                .data
+                .get(..4)
+                .and_then(|s| s.try_into().ok())
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid page header"))?,
+        ) as usize;
 
         // Data area starts at PAGE_HEADER_SIZE (fixed, never shifts).
         let data_area_start = PAGE_HEADER_SIZE;
@@ -727,7 +744,13 @@ impl Column {
         // Compute the byte offset into the data area where the new value begins.
         let prev_end = if num_vals > 0 {
             let prev_off_pos = 4 + (num_vals - 1) * 4;
-            u32::from_le_bytes(frame.data[prev_off_pos..prev_off_pos + 4].try_into().unwrap()) as usize
+            u32::from_le_bytes(
+                frame
+                    .data
+                    .get(prev_off_pos..prev_off_pos + 4)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid offset"))?,
+            ) as usize
         } else {
             0usize
         };
@@ -823,12 +846,13 @@ impl Column {
                 format!("page too small for header: {} < {}", data.len(), PAGE_HEADER_SIZE),
             ));
         }
-        let num_values = u32::from_le_bytes(data[..4].try_into().unwrap());
+        let err = || std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupted page header");
+        let num_values = u32::from_le_bytes(data.get(..4).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         let num_vals = num_values.min(MAX_VALS_PER_PAGE as u32) as usize;
         let mut offsets = [0u32; MAX_VALS_PER_PAGE];
         for (i, offset) in offsets.iter_mut().enumerate().take(num_vals) {
             let off_pos = 4 + i * 4;
-            *offset = u32::from_le_bytes(data[off_pos..off_pos + 4].try_into().unwrap());
+            *offset = u32::from_le_bytes(data.get(off_pos..off_pos + 4).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
         }
         Ok(PageHeader { num_values, offsets })
     }
