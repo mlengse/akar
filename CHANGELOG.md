@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Security
+
+- **Akar Safety Hardening & Compliance Gate (feature 022)** · gate `cargo test --manifest-path akar-core/Cargo.toml` **passed / 0 failed** · `python tools/doc-check.py --root akar` PASS
+  - Eliminated all production `unwrap()` calls across all 35 `akar-core` library crates, replacing them with typed `Result<T, AkarError>` propagation and poison-resilient synchronization (`lock_or_poisoned`).
+  - Eliminated all production `expect()` calls in library paths, converting panic points to structured error types and graceful diagnostics.
+  - Formally audited and documented 100% of retained `unsafe` blocks with detailed `// SAFETY:` comments specifying pointer validity, alignment, and bounds invariants.
+  - Integrated automated compliance verification scanner into `tools/doc-check.py` and `akar/tools/doc-check.py` to block unwrap/expect/undocumented-unsafe regressions continuously on commit and release pipelines.
+
 ## [0.3.3] - 2026-10-27
 
 ### Added

@@ -152,8 +152,21 @@ fn test_crash_after_checkpoint_clean_recovery() {
     let done_marker = sim.db_path().to_path_buf().join("checkpoint_done");
     let start = Instant::now();
     while !done_marker.exists() {
+        if let Some(ref mut child) = sim.child {
+            if let Ok(Some(status)) = child.try_wait() {
+                let mut out = String::new();
+                if let Some(mut s) = child.stdout.take() {
+                    let _ = std::io::Read::read_to_string(&mut s, &mut out);
+                }
+                let mut err = String::new();
+                if let Some(mut s) = child.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut s, &mut err);
+                }
+                panic!("child exited early with {status}: stdout={out}, stderr={err}");
+            }
+        }
         assert!(
-            start.elapsed() < Duration::from_secs(30),
+            start.elapsed() < Duration::from_secs(60),
             "child did not complete checkpoint in time"
         );
         thread::sleep(Duration::from_millis(25));

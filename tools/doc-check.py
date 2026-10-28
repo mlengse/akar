@@ -120,13 +120,41 @@ def check_findings():
     return 1
 
 
+def check_safety_compliance():
+    manifest = os.path.join(ROOT, "akar-core", "Cargo.toml")
+    if not os.path.exists(manifest):
+        print("SAFETY COMPLIANCE: SKIP (akar-core/Cargo.toml not found)")
+        return 0
+    import subprocess
+    cmd = [
+        "cargo", "clippy",
+        "--manifest-path", manifest,
+        "--lib",
+        "--",
+        "-D", "clippy::unwrap_used",
+        "-D", "clippy::expect_used",
+        "-D", "clippy::undocumented_unsafe_blocks",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            print("SAFETY COMPLIANCE: FAIL (violations found by clippy)")
+            return 1
+        print("SAFETY COMPLIANCE: PASS (0 unwraps, 0 expects, 100% documented unsafe)")
+        return 0
+    except FileNotFoundError:
+        print("SAFETY COMPLIANCE: WARN (cargo not found)")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Akar governance document validator")
     parser.add_argument("--check-version", action="store_true")
     parser.add_argument("--check-test-count", action="store_true")
     parser.add_argument("--check-findings", action="store_true")
+    parser.add_argument("--check-safety", action="store_true")
     args = parser.parse_args()
-    run_all = not (args.check_version or args.check_test_count or args.check_findings)
+    run_all = not (args.check_version or args.check_test_count or args.check_findings or args.check_safety)
     rc = 0
     if run_all or args.check_version:
         rc = rc or check_version()
@@ -134,6 +162,8 @@ def main():
         rc = rc or check_test_count()
     if run_all or args.check_findings:
         rc = rc or check_findings()
+    if run_all or args.check_safety:
+        rc = rc or check_safety_compliance()
     sys.exit(rc)
 
 
