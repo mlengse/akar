@@ -12,8 +12,9 @@ use crate::vector_index::VectorIndexTable;
 use akar_common::error::StorageError;
 use akar_common::types::{LogicalTypeID, Value, pk_value_to_string};
 use akar_vector::hnsw::DistanceMetric;
+
 use dashmap::DashMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// A column definition within a table.
@@ -53,6 +54,7 @@ pub struct NodeTable {
     pub art_index: Option<ArtPrimaryKeyIndex>,
     /// Set when an UPDATE/DELETE touches the table. The durable column mirror
     /// (see `persistence.rs`) performs a full rewrite when this flag is set.
+    pub dirty_columns: HashSet<usize>,
     pub persistence_dirty: bool,
     /// Optional spiller for memory-bounded bulk ingest. When set, newly
     /// created NodeGroups spill to disk once their buffer exceeds the memory
@@ -84,6 +86,7 @@ impl NodeTable {
             node_groups: Vec::new(),
             hash_index: HashIndex::new(),
             art_index: None,
+            dirty_columns: HashSet::new(),
             persistence_dirty: false,
             spiller: None,
         }
@@ -93,6 +96,20 @@ impl NodeTable {
     /// NodeGroup's buffer exceeds the memory threshold (P51.44).
     pub fn set_spiller(&mut self, spiller: Option<Arc<Spiller>>) {
         self.spiller = spiller;
+    }
+
+    /// Mark a single column dirty for column-granular persistence mirror checkpointing (FR-008).
+    pub fn mark_column_dirty(&mut self, col_idx: usize) {
+        self.dirty_columns.insert(col_idx);
+        self.persistence_dirty = true;
+    }
+
+    /// Mark all columns dirty (e.g. on row deletion or structural DDL).
+    pub fn mark_all_columns_dirty(&mut self) {
+        for ci in 0..self.columns.len() {
+            self.dirty_columns.insert(ci);
+        }
+        self.persistence_dirty = true;
     }
 
     /// Widen the table schema with a new column (ALTER TABLE ADD). Every
@@ -112,6 +129,8 @@ impl NodeTable {
             }
             group.columns.push(chunk);
         }
+
+
         self.persistence_dirty = true;
     }
 
@@ -203,6 +222,8 @@ impl NodeTable {
         // (P61.3) A row was appended in memory; mark the table dirty so the
         // next persist (checkpoint/sync) writes it to the durable column
         // mirrors even when the WAL holds no Insert record for it.
+
+
         self.persistence_dirty = true;
 
         // Update hash index with the PK value for this row
@@ -339,6 +360,8 @@ impl NodeTable {
         // (P61.3) Rows were appended in memory; mark the table dirty so the
         // durable column mirrors capture them at the next persist even if no
         // WAL Insert records exist for this batch.
+
+
         self.persistence_dirty = true;
 
         // Batch update indexes
@@ -530,6 +553,7 @@ impl NodeTable {
 
     /// Update a single cell (row, column) with a new value.
     pub fn update_cell(&mut self, row_idx: u64, col_idx: usize, value: Value) -> Result<(), StorageError> {
+        self.mark_column_dirty(col_idx);
         if col_idx >= self.columns.len() {
             return Err(StorageError::Page(format!("Column index {col_idx} out of range")));
         }
@@ -539,6 +563,8 @@ impl NodeTable {
                 self.num_rows
             )));
         }
+
+
         self.persistence_dirty = true;
 
         let mut offset = 0u64;
@@ -568,12 +594,15 @@ impl NodeTable {
     /// When `txn_id` is `Some(...)`, the delete is recorded in VersionInfo
     /// for MVCC snapshot isolation.
     pub fn delete_row_with_txn(&mut self, row_idx: u64, txn_id: Option<u64>) -> Result<(), StorageError> {
+        self.mark_all_columns_dirty();
         if row_idx >= self.num_rows {
             return Err(StorageError::Page(format!(
                 "Row index {row_idx} out of range (num_rows={})",
                 self.num_rows
             )));
         }
+
+
         self.persistence_dirty = true;
 
         // Locate the node group containing this row
@@ -913,6 +942,7 @@ pub struct RelTable {
     pub properties: Vec<Vec<Value>>,
     /// Set when an UPDATE/DELETE touches the table. The durable column mirror
     /// (see `persistence.rs`) performs a full rewrite when this flag is set.
+    pub dirty_columns: HashSet<usize>,
     pub persistence_dirty: bool,
 }
 
@@ -937,6 +967,7 @@ impl RelTable {
             rev_adj: HashMap::new(),
             csr_index: None,
             properties: vec![Vec::new(); num_cols],
+            dirty_columns: HashSet::new(),
             persistence_dirty: false,
         }
     }
@@ -949,6 +980,8 @@ impl RelTable {
         }
         self.columns.push(column);
         self.properties.push(vec![Value::Null; self.edges.len()]);
+
+
         self.persistence_dirty = true;
     }
 
@@ -1005,6 +1038,8 @@ impl RelTable {
         self.num_rows += 1;
         // (P61.3) Mark the rel table dirty so the durable mirror is rewritten
         // even when no WAL insert record exists for this edge.
+
+
         self.persistence_dirty = true;
         Ok(())
     }
@@ -1078,6 +1113,8 @@ impl RelTable {
         self.num_rows += total as u64;
         // (P61.3) Mark the rel table dirty so the durable mirror captures the
         // new edges even when no WAL insert records exist for this batch.
+
+
         self.persistence_dirty = true;
         Ok(total as u64)
     }
@@ -1107,6 +1144,8 @@ impl RelTable {
 
         // Tombstone the edge
         self.edges[edge_idx] = (u64::MAX, u64::MAX);
+
+
         self.persistence_dirty = true;
 
         // Nullify properties
@@ -1129,6 +1168,8 @@ impl RelTable {
         }
 
         self.properties[col_idx][edge_idx] = value;
+
+
         self.persistence_dirty = true;
         Ok(())
     }
@@ -1183,6 +1224,8 @@ impl RelTable {
                 }
             }
         }
+
+
         self.persistence_dirty = true;
         Ok(())
     }

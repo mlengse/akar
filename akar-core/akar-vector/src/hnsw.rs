@@ -37,7 +37,7 @@ const M: usize = 16;
 const M_MAX: usize = 32;
 
 /// Maximum number of candidates to keep during the search for neighbours.
-const EF_CONSTRUCTION: usize = 400;
+const EF_CONSTRUCTION: usize = 128;
 
 /// Number of iterations for the multi-element pruning procedure.
 const MAX_M: usize = M_MAX;
@@ -143,6 +143,8 @@ struct HnswNode {
 pub struct HnswIndex {
     /// All nodes in the index, keyed by node id.
     nodes: AHashMap<usize, HnswNode>,
+    /// Tombstoned (deleted) node IDs ignored during search.
+    tombstones: AHashSet<usize>,
     /// Number of layers in the graph.
     max_level: usize,
     /// Entry point — the node ID at the highest layer.
@@ -158,6 +160,7 @@ impl HnswIndex {
     pub fn new(metric: DistanceMetric) -> Self {
         Self {
             nodes: AHashMap::new(),
+            tombstones: AHashSet::new(),
             max_level: 0,
             entry_point: None,
             metric,
@@ -165,13 +168,27 @@ impl HnswIndex {
         }
     }
 
-    /// Number of vectors in the index.
+    /// Number of active vectors in the index (excluding tombstones).
     pub fn len(&self) -> usize {
-        self.nodes.len()
+        self.nodes.len().saturating_sub(self.tombstones.len())
     }
 
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+        self.len() == 0
+    }
+
+    /// Remove a vector from the index by ID (tombstone).
+    pub fn remove(&mut self, id: usize) -> bool {
+        if self.nodes.contains_key(&id) {
+            self.tombstones.insert(id)
+        } else {
+            false
+        }
+    }
+
+    /// Check whether a node has been tombstoned.
+    pub fn is_deleted(&self, id: usize) -> bool {
+        self.tombstones.contains(&id)
     }
 
     /// Remove all vectors and reset the graph to an empty state.
@@ -179,6 +196,7 @@ impl HnswIndex {
     /// Used to rebuild the index from live table data after DML (P52.38).
     pub fn clear(&mut self) {
         self.nodes.clear();
+        self.tombstones.clear();
         self.max_level = 0;
         self.entry_point = None;
     }
@@ -200,7 +218,11 @@ impl HnswIndex {
 
     /// Get a reference to the vectors stored in the index, ordered by node id.
     pub fn vectors(&self) -> Vec<&[f32]> {
-        let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self.nodes.iter().collect();
+        let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self
+            .nodes
+            .iter()
+            .filter(|(id, _)| !self.tombstones.contains(id))
+            .collect();
         sorted_nodes.sort_by_key(|&(id, _)| id);
         sorted_nodes.into_iter().map(|(_, n)| n.vector.as_slice()).collect()
     }
@@ -210,7 +232,11 @@ impl HnswIndex {
     /// The node id is the caller-supplied id (row offset in the calling
     /// table), so it is preserved across persist/load (P51.17).
     pub fn nodes(&self) -> Vec<(usize, &[f32])> {
-        let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self.nodes.iter().collect();
+        let mut sorted_nodes: Vec<(&usize, &HnswNode)> = self
+            .nodes
+            .iter()
+            .filter(|(id, _)| !self.tombstones.contains(id))
+            .collect();
         sorted_nodes.sort_by_key(|&(id, _)| id);
         sorted_nodes
             .into_iter()
@@ -363,10 +389,12 @@ impl HnswIndex {
         }
 
         // Extract candidates from max-heap in descending distance order into a pre-allocated vector,
-        // then reverse to get ascending distance order without general sorting overhead.
+        // filtering out tombstoned nodes, then reverse to get ascending distance order.
         let mut out = Vec::with_capacity(results.len());
         while let Some(c) = results.pop() {
-            out.push((c.0, c.1));
+            if !self.tombstones.contains(&c.1) {
+                out.push((c.0, c.1));
+            }
         }
         out.reverse();
         out.truncate(k);
@@ -375,53 +403,44 @@ impl HnswIndex {
 
     /// Select the `M` closest neighbours from a pre-sorted candidate list.
     ///
-    /// Uses the HNSW heuristic neighbor selection: candidates are chosen to be
-    /// both close to the query *and* well-distributed across the space, avoiding
-    /// the "clique" problem where all selected neighbors are clustered together.
-    /// For each candidate we compute its distance to the query and its minimum
-    /// distance to already-selected neighbors; the candidate maximizing
-    /// `min(dist_to_query, dist_to_nearest_selected)` wins each slot.
+    /// Implements Malkov & Yashunin (2016) Algorithm 4 (HNSW heuristic with diversity):
+    /// candidates are processed in ascending distance order. A candidate is accepted
+    /// into `selected` if and only if it is closer to the new element than to every
+    /// already-selected neighbor (preventing cliques and ensuring angular diversity).
+    /// Rejected candidates are held in `pruned` to backfill if fewer than `m` neighbors
+    /// meet the strict diversity test.
     fn select_neighbors_simple(&self, candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
         if candidates.is_empty() || m == 0 {
             return Vec::new();
         }
         let m = m.min(candidates.len());
         let mut selected: Vec<usize> = Vec::with_capacity(m);
-        let mut remaining: Vec<(f32, usize)> = candidates.to_vec();
+        let mut pruned: Vec<usize> = Vec::new();
 
-        // First selection: closest to the query.
-        selected.push(remaining[0].1);
-        remaining.remove(0);
-
-        while selected.len() < m && !remaining.is_empty() {
-            let mut best_idx = 0;
-            let mut best_score = f32::NEG_INFINITY;
-
-            for (idx, &(cand_dist, cand_id)) in remaining.iter().enumerate() {
-                // Minimum distance from this candidate to any already-selected neighbor.
-                let mut min_neighbor_dist = f32::INFINITY;
-                for &sel_id in &selected {
-                    let Some(sel_node) = self.nodes.get(&sel_id) else {
-                        break;
-                    };
-                    let Some(cand_node) = self.nodes.get(&cand_id) else {
-                        break;
-                    };
-                    let d = self.metric.compute(&cand_node.vector, &sel_node.vector);
-                    if d < min_neighbor_dist {
-                        min_neighbor_dist = d;
-                    }
-                }
-                // Score: close to query AND far from selected neighbors.
-                let score = cand_dist.min(min_neighbor_dist);
-                if score > best_score {
-                    best_score = score;
-                    best_idx = idx;
-                }
+        for &(cand_dist, cand_id) in candidates {
+            if selected.len() >= m {
+                break;
             }
+            let Some(cand_node) = self.nodes.get(&cand_id) else {
+                continue;
+            };
+            let closer_to_query_than_selected = selected.iter().all(|&sel_id| {
+                self.nodes
+                    .get(&sel_id)
+                    .map_or(true, |sel_node| cand_dist < self.metric.compute(&cand_node.vector, &sel_node.vector))
+            });
+            if closer_to_query_than_selected {
+                selected.push(cand_id);
+            } else {
+                pruned.push(cand_id);
+            }
+        }
 
-            selected.push(remaining[best_idx].1);
-            remaining.remove(best_idx);
+        for cand_id in pruned {
+            if selected.len() >= m {
+                break;
+            }
+            selected.push(cand_id);
         }
 
         selected
@@ -436,6 +455,7 @@ impl HnswIndex {
     /// returns `id` for it. Node ids may be sparse (P51.17) — callers pass
     /// their own row ids so a search result always addresses the same row.
     pub fn insert(&mut self, vector: Vec<f32>, id: usize) {
+        self.tombstones.remove(&id);
         let new_level = if self.nodes.is_empty() {
             MAX_M // First node goes to max level
         } else {
@@ -533,7 +553,7 @@ impl HnswIndex {
                 }
             }
 
-            current_entry = ep;
+            current_entry = candidates.first().map_or(ep, |c| c.1);
         }
 
         // Update entry point if the new node has a higher level
@@ -702,7 +722,9 @@ impl HnswIndex {
 
         let mut out = Vec::with_capacity(results.len());
         while let Some(c) = results.pop() {
-            out.push((c.0, c.1));
+            if !self.tombstones.contains(&c.1) {
+                out.push((c.0, c.1));
+            }
         }
         out.reverse();
         out.truncate(k);

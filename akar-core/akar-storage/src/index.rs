@@ -733,6 +733,15 @@ impl SecondaryIndex {
             !offsets.is_empty()
         });
     }
+
+    /// Update a row offset from an old key to a new key.
+    pub fn update_row(&mut self, old_key: &str, new_key: String, offset: u64) {
+        if let Some(offsets) = self.entries.get_mut(old_key) {
+            offsets.retain(|&cand| cand != offset);
+        }
+        self.entries.retain(|_, offsets| !offsets.is_empty());
+        self.insert(new_key, offset);
+    }
 }
 
 // ---------------------------------------------------------------------------
