@@ -1907,9 +1907,13 @@ impl Binder {
         // (P52.39, kept under the P104.2 clean break).
         {
             let mut catalog = self.catalog.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-            catalog
-                .register_fts_index(index_name.clone(), f.table_name.clone(), f.column_name.clone())
-                .map_err(|e| format!("Failed to register FTS index: {e}"))?;
+            if f.if_not_exists && catalog.get_fts_index(&index_name).is_some() {
+                // If IF NOT EXISTS is set and index already registered, skip re-registering
+            } else {
+                catalog
+                    .register_fts_index(index_name.clone(), f.table_name.clone(), f.column_name.clone())
+                    .map_err(|e| format!("Failed to register FTS index: {e}"))?;
+            }
         }
 
         Ok(BoundStatement::BoundCreateFtsIndex(BoundCreateFtsIndex {

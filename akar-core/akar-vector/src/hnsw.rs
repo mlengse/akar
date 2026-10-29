@@ -409,7 +409,21 @@ impl HnswIndex {
     /// already-selected neighbor (preventing cliques and ensuring angular diversity).
     /// Rejected candidates are held in `pruned` to backfill if fewer than `m` neighbors
     /// meet the strict diversity test.
-    fn select_neighbors_simple(&self, candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
+    fn get_node_vec<'a>(&'a self, node_id: usize, pending: Option<(usize, &'a [f32])>) -> Option<&'a [f32]> {
+        if let Some((p_id, p_vec)) = pending {
+            if node_id == p_id {
+                return Some(p_vec);
+            }
+        }
+        self.nodes.get(&node_id).map(|n| n.vector.as_slice())
+    }
+
+    fn select_neighbors_heuristic(
+        &self,
+        candidates: &[(f32, usize)],
+        m: usize,
+        pending: Option<(usize, &[f32])>,
+    ) -> Vec<usize> {
         if candidates.is_empty() || m == 0 {
             return Vec::new();
         }
@@ -421,13 +435,12 @@ impl HnswIndex {
             if selected.len() >= m {
                 break;
             }
-            let Some(cand_node) = self.nodes.get(&cand_id) else {
+            let Some(cand_vec) = self.get_node_vec(cand_id, pending) else {
                 continue;
             };
             let closer_to_query_than_selected = selected.iter().all(|&sel_id| {
-                self.nodes
-                    .get(&sel_id)
-                    .map_or(true, |sel_node| cand_dist < self.metric.compute(&cand_node.vector, &sel_node.vector))
+                self.get_node_vec(sel_id, pending)
+                    .map_or(true, |sel_vec| cand_dist < self.metric.compute(cand_vec, sel_vec))
             });
             if closer_to_query_than_selected {
                 selected.push(cand_id);
@@ -444,6 +457,10 @@ impl HnswIndex {
         }
 
         selected
+    }
+
+    fn select_neighbors_simple(&self, candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
+        self.select_neighbors_heuristic(candidates, m, None)
     }
 
     // ---- Public API ----
@@ -523,33 +540,21 @@ impl HnswIndex {
                     continue;
                 }
 
-                // Slow path: neighbor has reached max_conn connections.
-                // Find the existing connection with the maximum distance and replace it in-place
-                // if the new node is closer, avoiding heap allocations and vector sorting.
-                let existing_connections: &[usize] = &neighbor_node.connections[level];
-                let neighbor_vec = &neighbor_node.vector;
-
-                let d = self.metric.compute(&vector, neighbor_vec);
-
-                let mut worst_d = f32::NEG_INFINITY;
-                let mut worst_idx = 0;
-                let mut has_worst = false;
-
-                for (idx, &nid) in existing_connections.iter().enumerate() {
-                    if let Some(n) = self.nodes.get(&nid) {
-                        let dist = self.metric.compute(&n.vector, neighbor_vec);
-                        if dist > worst_d {
-                            worst_d = dist;
-                            worst_idx = idx;
-                            has_worst = true;
-                        }
-                    }
-                }
-
-                if has_worst && d < worst_d {
-                    if let Some(n) = self.nodes.get_mut(&neighbor_id) {
-                        n.connections[level][worst_idx] = id;
-                    }
+                // Shrink neighbor's connections to max_conn using diversity heuristic (Algorithm 4)
+                let d = self.metric.compute(&vector, &neighbor_node.vector);
+                let mut cand_list: Vec<(f32, usize)> = neighbor_node.connections[level]
+                    .iter()
+                    .filter_map(|&nid| {
+                        self.nodes
+                            .get(&nid)
+                            .map(|n| (self.metric.compute(&n.vector, &neighbor_node.vector), nid))
+                    })
+                    .collect();
+                cand_list.push((d, id));
+                cand_list.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let new_conns = self.select_neighbors_heuristic(&cand_list, max_conn, Some((id, &vector)));
+                if let Some(n) = self.nodes.get_mut(&neighbor_id) {
+                    n.connections[level] = new_conns;
                 }
             }
 

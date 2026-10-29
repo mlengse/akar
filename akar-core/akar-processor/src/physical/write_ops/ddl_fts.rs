@@ -114,6 +114,27 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
             .db_path()
             .filter(|p| p.to_string_lossy() != ":memory:")
             .map(|p| p.join("fts").join(&self.index_name));
+
+        if self.if_not_exists {
+            let already_exists = self.table_catalog.fts_runtime_handle(&self.index_name).is_some()
+                || index_dir.as_deref().map_or(false, |p| p.exists() && p.read_dir().map_or(false, |mut d| d.next().is_some()));
+            if already_exists {
+                let mut result_vec = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::String, 1);
+                result_vec.resize(1);
+                result_vec
+                    .set_value(
+                        0,
+                        &Value::String(format!("FTS index '{}' already exists.", self.index_name)),
+                    )
+                    .map_err(|e| ProcessorError::Execution(format!("Failed to set result value: {e}")))?;
+                let arr = akar_common::arrow_vector::ArrowVector::from_legacy(&result_vec).array;
+                let mut result = DataChunk::new(vec![arr], vec![akar_common::types::PhysicalTypeID::String]);
+                result.size = 1;
+                result.field_names = vec!["result".to_string()];
+                return Ok(vec![result]);
+            }
+        }
+
         akar_fts::build::build_index(&columns, &self.column_name, &tokenizer, index_dir.as_deref(), &rows)?;
 
         let mut result_vec = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::String, 1);

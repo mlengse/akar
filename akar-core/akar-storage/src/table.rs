@@ -1825,30 +1825,43 @@ impl TableCatalog {
             None => return,
         };
 
-        // Collect (row_id, vector) pairs while holding the read reference,
-        // then re-insert under a single mutable borrow of the index.
-        let mut data: Vec<(usize, Vec<f32>)> = Vec::new();
-        if let Some(table) = self.get_node_table_by_name(&table_name) {
-            for row_id in 0..table.num_rows as usize {
-                if let Some(val) = table.get_value(row_id, col_idx) {
+        let Some(table) = self.get_node_table_by_name(&table_name) else {
+            return;
+        };
+        let mut updates: Vec<(usize, Option<Vec<f32>>)> = Vec::new();
+        for row_id in 0..table.num_rows as usize {
+            match table.get_value(row_id, col_idx) {
+                Some(val) if !matches!(val, Value::Null) => {
                     if let Ok(vec) = crate::extract_f32_list_from_value(val) {
-                        data.push((row_id, vec));
+                        updates.push((row_id, Some(vec)));
+                    } else {
+                        updates.push((row_id, None));
                     }
+                }
+                _ => {
+                    updates.push((row_id, None));
                 }
             }
         }
-        if data.is_empty() {
-            if let Some(mut vi) = self.vector_indexes.get_mut(&index_id) {
-                vi.hnsw_mut().clear();
-            }
-            return;
-        }
+        drop(table);
 
-        let mut vi = self.vector_indexes.get_mut(&index_id);
-        if let Some(vi) = vi.as_mut() {
-            vi.hnsw_mut().clear();
-            for (row_id, vec) in data {
-                vi.hnsw_mut().insert(vec, row_id);
+        if let Some(mut vi) = self.vector_indexes.get_mut(&index_id) {
+            for (row_id, maybe_vec) in updates {
+                match maybe_vec {
+                    Some(vec) => {
+                        let already_indexed = vi
+                            .hnsw()
+                            .get_vector(row_id)
+                            .map_or(false, |ev| ev == vec.as_slice())
+                            && !vi.hnsw().is_deleted(row_id);
+                        if !already_indexed {
+                            vi.hnsw_mut().insert(vec, row_id);
+                        }
+                    }
+                    None => {
+                        vi.hnsw_mut().remove(row_id);
+                    }
+                }
             }
         }
     }
