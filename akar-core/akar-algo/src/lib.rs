@@ -1013,10 +1013,10 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
 
     let mut visited = vec![false; n];
     let mut order = Vec::with_capacity(n);
-    let mut dfs_stack: Vec<(usize, usize)> = Vec::new();
+    let mut dfs_stack: Vec<(usize, usize)> = Vec::with_capacity(n);
 
     // Phase 1: iterative DFS to get finish order (P52.47 — iterative DFS avoids
-    // stack overflow on deep graphs). Hoisting `dfs_stack` outside loop avoids allocation churn.
+    // stack overflow on deep graphs). Pre-allocating `dfs_stack` avoids allocation churn.
     for start in 0..n {
         if visited[start] {
             continue;
@@ -1086,10 +1086,13 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
         }
     }
 
-    let mut component = vec![0usize; n];
+    // Bolt Optimization: Pre-allocate `component` directly as `Vec<f64>` to eliminate secondary
+    // heap vector allocations and conversion loops (`component.iter().map(|&c| c as f64).collect()`).
+    // Pre-allocate `dfs_stack2` capacity to avoid dynamic stack re-allocations during reverse DFS.
+    let mut component = vec![0.0f64; n];
     let mut comp_id = 0usize;
     let mut visited2 = vec![false; n];
-    let mut dfs_stack2 = Vec::new();
+    let mut dfs_stack2 = Vec::with_capacity(n);
 
     for &v in order.iter().rev() {
         if visited2[v] {
@@ -1099,7 +1102,7 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
         dfs_stack2.push(v);
         visited2[v] = true;
         while let Some(cur) = dfs_stack2.pop() {
-            component[cur] = comp_id;
+            component[cur] = comp_id as f64;
             let start_off = rev_offsets[cur];
             let end_off = rev_offsets[cur + 1];
             for &w in &rev_adj[start_off..end_off] {
@@ -1114,7 +1117,7 @@ pub fn compute_scc_kosaraju(csr: &CSRAdjacency) -> AlgoResult {
 
     AlgoResult {
         name: "scc_kosaraju".into(),
-        values: component.iter().map(|&c| c as f64).collect(),
+        values: component,
         metadata: None,
     }
 }
@@ -1273,7 +1276,7 @@ pub fn compute_lpa(csr: &CSRAdjacency, max_iters: usize) -> AlgoResult {
 
     AlgoResult {
         name: "lpa".into(),
-        values: labels.iter().map(|&c| c as f64).collect(),
+        values: labels.into_iter().map(|c| c as f64).collect(),
         metadata: None,
     }
 }
