@@ -58,18 +58,9 @@ const EF_SEARCH: usize = 200;
 /// Vector count at or below which the index behaves as a flat vector store:
 /// every query scans all live vectors instead of traversing a graph (T064).
 ///
-/// The threshold is a measured choice, not a guess. On the SC-001/SC-002
-/// corpus (uniform random 384-d) a full scan of 10,000 vectors returns the
-/// exact ranking with a p95 of ~3.0 ms, against ~19 s to build the graph and
-/// 0.66 overlap@10 at `ef=128` (0.18 at `ef=16`). The graph's default-width
-/// query is faster (~1.9 ms) but wrong by a third of the result set, so the
-/// default trades ~1 ms of latency for an exact answer and a build that is
-/// three orders of magnitude cheaper.
-///
-/// Above the threshold the graph path is the HNSW implementation described in
-/// this module. Its build time and recall have **not** been measured at that
-/// scale — see `CHANGELOG.md`. The insert that crosses the threshold pays one
-/// full graph build, so it is much slower than the inserts around it.
+/// Supported operating range, threshold tuning, and empirical measurements:
+/// see `akar/SPEC.md` §12.3. Above this threshold, the graph traversal path is
+/// unmeasured and carries no build-time or recall promise.
 pub const EXACT_SEARCH_MAX_NODES: usize = 50_000;
 
 /// Maximum level generation factor: `1 / ln(M_max)`.
