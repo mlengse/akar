@@ -20,6 +20,7 @@
 - **Per-column dirty tracking replaces the single persistence flag (feature 024, T004/T034–T038)** · gate `cargo test -p akar-storage --test column_dirty_checkpoint_test` **1 passed / 0 failed**
   - `NodeTable` keeps a `dirty_columns` set instead of one `persistence_dirty` bit, so a checkpoint rewrites only the columns that actually changed. On a 16-column table with 200 rows, updating one column rewrote that column plus metadata only (<10% of the mirror bytes) and a reload reproduced the exact values.
   - The append-only batch-insert path still appends incrementally rather than marking every column dirty; there is no bulk-update API to exercise the alternative.
+  - Closes the backlog finding **F17** (sustained ingest rewrote the entire column mirror on every UPDATE/DELETE). The 16 MiB checkpoint threshold is unchanged, so the accepting mitigation — an explicit `CHECKPOINT` at batch boundaries — still applies, but a checkpoint no longer rewrites untouched columns.
 
 ### Security
 
