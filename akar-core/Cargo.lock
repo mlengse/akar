@@ -256,6 +256,7 @@ dependencies = [
  "akar-iceberg",
  "akar-json",
  "akar-llm",
+ "akar-main",
  "akar-markdown",
  "akar-ml",
  "akar-neo4j",
