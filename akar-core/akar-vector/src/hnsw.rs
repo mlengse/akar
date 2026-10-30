@@ -1,6 +1,16 @@
 //! HNSW (Hierarchical Navigable Small World) index for approximate nearest
 //! neighbour search.
 //!
+//! # Exact scan below the threshold
+//!
+//! Graph ANN is not free: building the graph costs O(n log n) distance
+//! computations and a narrow beam still misses neighbours. On the benchmark
+//! corpus in `examples/bench_021.rs` (10,000 × 384-d) the graph took ~19 s to
+//! build and returned 0.66 overlap@10 at `ef=128`, while scanning every vector
+//! is exact and costs a few milliseconds. The index therefore behaves as a
+//! flat vector store at or below [`EXACT_SEARCH_MAX_NODES`] and links the graph
+//! lazily, in one pass, only when the corpus grows past it.
+//!
 //! # Algorithm
 //!
 //! HNSW builds a multi-layer graph where:
@@ -44,6 +54,23 @@ const MAX_M: usize = M_MAX;
 
 /// Size of the dynamic candidate list during search.
 const EF_SEARCH: usize = 200;
+
+/// Vector count at or below which the index behaves as a flat vector store:
+/// every query scans all live vectors instead of traversing a graph (T064).
+///
+/// The threshold is a measured choice, not a guess. On the SC-001/SC-002
+/// corpus (uniform random 384-d) a full scan of 10,000 vectors returns the
+/// exact ranking with a p95 of ~3.0 ms, against ~19 s to build the graph and
+/// 0.66 overlap@10 at `ef=128` (0.18 at `ef=16`). The graph's default-width
+/// query is faster (~1.9 ms) but wrong by a third of the result set, so the
+/// default trades ~1 ms of latency for an exact answer and a build that is
+/// three orders of magnitude cheaper.
+///
+/// Above the threshold the graph path is the HNSW implementation described in
+/// this module. Its build time and recall have **not** been measured at that
+/// scale — see `CHANGELOG.md`. The insert that crosses the threshold pays one
+/// full graph build, so it is much slower than the inserts around it.
+pub const EXACT_SEARCH_MAX_NODES: usize = 50_000;
 
 /// Maximum level generation factor: `1 / ln(M_max)`.
 fn ml() -> f64 {
@@ -153,11 +180,33 @@ pub struct HnswIndex {
     metric: DistanceMetric,
     /// Random state for level generation.
     rng_state: u64,
+    /// Vector count at or below which queries scan exactly instead of walking
+    /// the graph. See [`EXACT_SEARCH_MAX_NODES`].
+    exact_threshold: usize,
+    /// Whether graph links have been built. `false` means the index is a flat
+    /// vector store: `insert` only appends the vector and search scans.
+    graph_built: bool,
+    /// Node ids in insertion order. Only maintained while the store is flat,
+    /// and consumed once to link a deterministic graph when it crosses
+    /// `exact_threshold`.
+    insertion_order: Vec<usize>,
 }
 
 impl HnswIndex {
     /// Create a new HNSW index with the given distance metric.
+    ///
+    /// Starts as a flat vector store and builds the graph only when the corpus
+    /// exceeds [`EXACT_SEARCH_MAX_NODES`].
     pub fn new(metric: DistanceMetric) -> Self {
+        Self::with_exact_threshold(metric, EXACT_SEARCH_MAX_NODES)
+    }
+
+    /// Create an index with an explicit exact-scan threshold.
+    ///
+    /// A threshold of `0` forces the graph path from the first insert, which
+    /// is what the graph-level tests use; the default
+    /// ([`EXACT_SEARCH_MAX_NODES`]) is what production callers get.
+    pub fn with_exact_threshold(metric: DistanceMetric, exact_threshold: usize) -> Self {
         Self {
             nodes: AHashMap::new(),
             tombstones: AHashSet::new(),
@@ -165,6 +214,9 @@ impl HnswIndex {
             entry_point: None,
             metric,
             rng_state: 42,
+            exact_threshold,
+            graph_built: false,
+            insertion_order: Vec::new(),
         }
     }
 
@@ -199,16 +251,30 @@ impl HnswIndex {
         self.tombstones.clear();
         self.max_level = 0;
         self.entry_point = None;
+        self.graph_built = false;
+        self.insertion_order.clear();
     }
 
     /// Get the current maximum level of the graph.
+    ///
+    /// Returns `0` while the index is a flat store (`graph_built == false`):
+    /// there is no graph yet, and the next threshold crossing builds it.
     pub fn max_level(&self) -> usize {
         self.max_level
     }
 
     /// Get the entry point node ID (if any).
+    ///
+    /// Returns `None` while the index is a flat store.
     pub fn entry_point(&self) -> Option<usize> {
         self.entry_point
+    }
+
+    /// Whether the graph links have been built.
+    ///
+    /// `false` while the corpus is at or below the exact-scan threshold.
+    pub fn is_graph_built(&self) -> bool {
+        self.graph_built
     }
 
     /// Get the distance metric used by this index.
@@ -471,8 +537,44 @@ impl HnswIndex {
     /// preserved verbatim: the node is stored under `id`, and `search`
     /// returns `id` for it. Node ids may be sparse (P51.17) — callers pass
     /// their own row ids so a search result always addresses the same row.
+    ///
+    /// While the store is flat (at or below the exact-scan threshold) this
+    /// only appends the vector; the graph is linked in one pass when the
+    /// corpus crosses the threshold, so build time at benchmark scale is the
+    /// cost of copying vectors rather than the cost of graph construction.
     pub fn insert(&mut self, vector: Vec<f32>, id: usize) {
         self.tombstones.remove(&id);
+
+        if !self.graph_built {
+            let replaced = self
+                .nodes
+                .insert(
+                    id,
+                    HnswNode {
+                        vector,
+                        connections: Vec::new(),
+                    },
+                )
+                .is_some();
+            if !replaced {
+                self.insertion_order.push(id);
+            }
+            if self.nodes.len() > self.exact_threshold {
+                self.build_graph();
+            }
+            return;
+        }
+
+        self.insert_graph_node(id, vector);
+    }
+
+    /// Link one vector into an already-built graph.
+    ///
+    /// This is the original HNSW insertion (Malkov & Yashunin, Algorithm 1).
+    /// It assumes `graph_built` is set. If `id` already exists (a re-insert
+    /// after a tombstone), the old node is still present while neighbours are
+    /// searched, and the final insert replaces it with the freshly linked node.
+    fn insert_graph_node(&mut self, id: usize, vector: Vec<f32>) {
         let new_level = if self.nodes.is_empty() {
             MAX_M // First node goes to max level
         } else {
@@ -571,6 +673,46 @@ impl HnswIndex {
         self.nodes.insert(id, HnswNode { vector, connections });
     }
 
+    /// Link the flat store into a graph, once, when the corpus crosses the
+    /// exact-scan threshold.
+    ///
+    /// Nodes are relinked in insertion order so the graph is deterministic
+    /// (the node map is hash-ordered and would otherwise produce a different
+    /// graph per run). Tombstoned vectors are left unlinked: a deleted vector
+    /// must never become a neighbour.
+    fn build_graph(&mut self) {
+        debug_assert!(!self.graph_built, "the graph is built exactly once");
+        let order = std::mem::take(&mut self.insertion_order);
+        let mut pending: Vec<(usize, Vec<f32>)> = Vec::with_capacity(self.nodes.len());
+
+        for id in order {
+            if self.tombstones.contains(&id) {
+                continue;
+            }
+            if let Some(node) = self.nodes.remove(&id) {
+                pending.push((id, node.vector));
+            }
+        }
+        // Defensive: a node missing from the order list still has to be linked,
+        // otherwise it would become silently unreachable through the graph.
+        let unordered: Vec<usize> = self.nodes.keys().copied().collect();
+        for id in unordered {
+            if self.tombstones.contains(&id) {
+                continue;
+            }
+            if let Some(node) = self.nodes.remove(&id) {
+                pending.push((id, node.vector));
+            }
+        }
+
+        self.graph_built = true;
+        self.max_level = 0;
+        self.entry_point = None;
+        for (id, vector) in pending {
+            self.insert_graph_node(id, vector);
+        }
+    }
+
     /// Search for the `k` approximate nearest neighbours to `query`, using the
     /// default beam width ([`EF_SEARCH`], floored at `k`).
     ///
@@ -585,6 +727,37 @@ impl HnswIndex {
         self.search_with_ef(query, k, EF_SEARCH)
     }
 
+    /// Scan every live vector for the exact `k` nearest neighbours.
+    ///
+    /// This is the whole search path while the corpus is at or below the
+    /// exact-scan threshold: no beam, no graph, no approximation. Ties are
+    /// broken by node id, so the ranking is stable across runs.
+    fn search_exact(&self, query: &[f32], k: usize) -> Vec<(f32, usize)> {
+        self.search_exact_filtered(query, k, |_| true)
+    }
+
+    fn search_exact_filtered(&self, query: &[f32], k: usize, filter: impl Fn(usize) -> bool) -> Vec<(f32, usize)> {
+        if k == 0 {
+            return Vec::new();
+        }
+        let mut scored: Vec<(f32, usize)> = self
+            .nodes
+            .iter()
+            .filter(|(id, _)| !self.tombstones.contains(id) && filter(**id))
+            .map(|(&id, node)| (self.metric.compute(&node.vector, query), id))
+            .collect();
+
+        // Total order so `select_nth_unstable_by` partitions a well-defined
+        // top-k (f32 alone has no Ord and ties would be arbitrary).
+        let by_distance = |a: &(f32, usize), b: &(f32, usize)| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1));
+        if scored.len() > k {
+            scored.select_nth_unstable_by(k - 1, by_distance);
+            scored.truncate(k);
+        }
+        scored.sort_by(by_distance);
+        scored
+    }
+
     /// Search for the `k` approximate nearest neighbours to `query`, expanding
     /// a beam of `ef` candidates at layer 0.
     ///
@@ -594,6 +767,10 @@ impl HnswIndex {
     /// one, otherwise the parameter is a lie. Latency grows with `ef`, so
     /// callers should measure rather than assume the default is enough.
     ///
+    /// While the corpus is at or below the exact-scan threshold the beam has
+    /// nothing to bind to: the query scans every vector and `ef` cannot change
+    /// the answer. See [`EXACT_SEARCH_MAX_NODES`].
+    ///
     /// # Errors
     ///
     /// Returns an empty vec when the index is empty, when `k == 0`, or when
@@ -602,8 +779,11 @@ impl HnswIndex {
         if self.nodes.is_empty() || k == 0 || ef == 0 {
             return Vec::new();
         }
+        if !self.graph_built {
+            return self.search_exact(query, k);
+        }
         let Some(entry) = self.entry_point else {
-            return Vec::new();
+            return self.search_exact(query, k);
         };
 
         // Phase 1: Greedy descent from top level to level 1
@@ -627,6 +807,10 @@ impl HnswIndex {
     /// Returns a list of `(distance, node_id)` pairs sorted by distance
     /// (closest first). Returns an empty vec when the index is empty, when
     /// `k == 0`, or when `ef == 0`.
+    ///
+    /// While the corpus is at or below the exact-scan threshold the filter is
+    /// applied to every live vector, so the result is the exact filtered
+    /// top-`k`; `ef` cannot change the answer (see [`EXACT_SEARCH_MAX_NODES`]).
     pub fn search_with_filter(
         &self,
         query: &[f32],
@@ -637,8 +821,11 @@ impl HnswIndex {
         if self.nodes.is_empty() || k == 0 || ef == 0 {
             return Vec::new();
         }
+        if !self.graph_built {
+            return self.search_exact_filtered(query, k, filter);
+        }
         let Some(entry) = self.entry_point else {
-            return Vec::new();
+            return self.search_exact_filtered(query, k, filter);
         };
 
         // Phase 1: Greedy descent from top level to level 1.
@@ -740,11 +927,18 @@ impl HnswIndex {
     }
 
     /// Get the degree (number of connections at level 0) for a node.
+    ///
+    /// Returns `None` for an unknown node id, and for any node while the index
+    /// is still a flat store — there is no graph to measure yet.
     pub fn degree(&self, id: usize) -> Option<usize> {
         self.nodes.get(&id).and_then(|n| n.connections.first().map(|c| c.len()))
     }
 
     /// Collect index statistics.
+    ///
+    /// While the index is a flat store the graph is not built, so
+    /// `total_connections` and `avg_degree` are zero; `num_vectors` and
+    /// `max_level` still describe the stored state.
     pub fn stats(&self) -> HnswStats {
         let total_connections: usize = self
             .nodes
@@ -810,10 +1004,72 @@ mod tests {
 
     #[test]
     fn test_single_insert() {
-        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        // T064: the entry point is a graph concept, so this asserts the graph
+        // path explicitly. A default index stays flat and has no entry point.
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 0);
         idx.insert(vec![1.0, 2.0, 3.0], 0);
         assert_eq!(idx.len(), 1);
         assert_eq!(idx.entry_point(), Some(0));
+        assert!(idx.is_graph_built());
+
+        let mut flat = HnswIndex::new(DistanceMetric::Euclidean);
+        flat.insert(vec![1.0, 2.0, 3.0], 0);
+        assert_eq!(flat.len(), 1);
+        assert_eq!(flat.entry_point(), None, "a flat store has no graph entry point");
+        assert!(!flat.is_graph_built());
+        assert_eq!(flat.search(&[1.0, 2.0, 3.0], 1).len(), 1);
+    }
+
+    /// T064: crossing the threshold links the flat store into a graph, and the
+    /// graph stays searchable afterwards.
+    #[test]
+    fn crossing_the_exact_threshold_builds_the_graph() {
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 4);
+        for id in 0..4 {
+            idx.insert(vec![id as f32, id as f32], id);
+        }
+        assert!(!idx.is_graph_built(), "at the threshold the store stays flat");
+        assert_eq!(idx.stats().total_connections, 0, "a flat store has no links");
+
+        idx.insert(vec![4.0, 4.0], 4);
+        assert!(idx.is_graph_built(), "one past the threshold builds the graph");
+        assert!(idx.stats().total_connections > 0, "the built graph must have links");
+        assert_eq!(idx.len(), 5);
+
+        let hits = idx.search(&[0.0, 0.0], 3);
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].1, 0, "the nearest vector must still be found");
+    }
+
+    /// T064: tombstoned vectors are never linked into the graph when the flat
+    /// store is relinked at the threshold.
+    #[test]
+    fn crossing_the_threshold_leaves_tombstones_unlinked() {
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 2);
+        idx.insert(vec![0.0, 0.0], 0);
+        idx.insert(vec![1.0, 1.0], 1);
+        idx.remove(0);
+        idx.insert(vec![2.0, 2.0], 2);
+
+        assert!(idx.is_graph_built());
+        assert_eq!(idx.len(), 2);
+        let hits = idx.search(&[0.0, 0.0], 2);
+        assert!(
+            hits.iter().all(|(_, id)| *id != 0),
+            "a deleted vector must not be reachable after the graph is built"
+        );
+        assert_eq!(hits.len(), 2, "the live vectors must stay searchable");
+    }
+
+    /// T064: the default threshold must cover the SC-001/SC-002 benchmark
+    /// corpus, otherwise those criteria would silently measure the graph path.
+    #[test]
+    fn the_default_threshold_covers_the_benchmark_corpus() {
+        let threshold = EXACT_SEARCH_MAX_NODES;
+        assert!(
+            threshold >= 10_000,
+            "the 10k benchmark corpus must be served by the exact path, got {threshold}"
+        );
     }
 
     #[test]
@@ -849,11 +1105,23 @@ mod tests {
         }
     }
 
-    /// Build a navigable HNSW over `n` dense random vectors of dimension `dims`,
-    /// plus the query, returning the index and the query vector.
-    fn dense_index(n: usize, dims: usize, seed: u64) -> (HnswIndex, Vec<f32>) {
+    /// Build a flat (exact-scan) index over `n` dense random vectors.
+    fn flat_index(n: usize, dims: usize, seed: u64) -> (HnswIndex, Vec<f32>) {
         let mut rng = seed;
         let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        for id in 0..n {
+            idx.insert(random_vector(&mut rng, dims), id);
+        }
+        let query = random_vector(&mut rng, dims);
+        (idx, query)
+    }
+
+    /// Build a graph-backed index over `n` dense random vectors of dimension
+    /// `dims`. The threshold is forced to `0` so the graph is exercised at a
+    /// size a unit test can afford.
+    fn dense_index(n: usize, dims: usize, seed: u64) -> (HnswIndex, Vec<f32>) {
+        let mut rng = seed;
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 0);
         for id in 0..n {
             idx.insert(random_vector(&mut rng, dims), id);
         }
@@ -1049,7 +1317,7 @@ mod tests {
         let dims = 16;
         let num_vectors = 200;
 
-        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 0);
 
         // Insert random vectors
         for i in 0..num_vectors {
@@ -1121,7 +1389,7 @@ mod tests {
         let dims = 8;
         let num_vectors = 1000;
 
-        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 0);
 
         for i in 0..num_vectors {
             let v = random_vector(&mut rng, dims);
@@ -1161,7 +1429,9 @@ mod tests {
 
     #[test]
     fn test_search_layer_0_is_sorted() {
-        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        // Layer 0 is the graph's beam search; force the graph path so this
+        // keeps testing traversal rather than the exact scan.
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 0);
         let mut rng: u64 = 5555;
         for i in 0..100 {
             idx.insert(random_vector(&mut rng, 16), i);
@@ -1179,9 +1449,88 @@ mod tests {
         }
     }
 
+    /// T064: below the exact-search threshold the index must return the true
+    /// top-`k`. SC-002 measures overlap against exactly this ranking, so an
+    /// approximate answer at benchmark scale is the failure being fixed.
+    #[test]
+    fn flat_mode_returns_the_exact_top_k() {
+        let (idx, query) = flat_index(2_000, 96, 0xF1A7);
+        let k = 10;
+
+        let want = exact_top_k(&idx, &query, k);
+        let got: Vec<usize> = idx.search(&query, k).into_iter().map(|(_, id)| id).collect();
+
+        assert_eq!(
+            got, want,
+            "flat mode must reproduce the exact ranking, not approximate it"
+        );
+    }
+
+    /// T064: while the index is flat there is no graph to widen, so the beam
+    /// width must not change the result. This pins the routing decision: an
+    /// index at or below the threshold never pays for graph traversal.
+    #[test]
+    fn flat_mode_ignores_the_beam_width() {
+        let (idx, query) = flat_index(2_000, 96, 0xB0A7);
+
+        let narrow = idx.search_with_ef(&query, 10, 16);
+        let wide = idx.search_with_ef(&query, 10, 400);
+
+        assert_eq!(
+            narrow, wide,
+            "flat mode has no graph to explore, so ef must not change the answer"
+        );
+    }
+
+    /// T064: the filtered search is used by the SQL vector path. In flat mode
+    /// the filter must be applied to every live node, so the result is the
+    /// exact filtered top-`k` — not a beam that happened to contain matches.
+    #[test]
+    fn flat_mode_filtered_search_is_exact() {
+        let (idx, query) = flat_index(2_000, 96, 0xF117);
+        let k = 10;
+        let keep = |id: usize| id.is_multiple_of(7);
+
+        let mut want: Vec<(f32, usize)> = idx
+            .nodes()
+            .into_iter()
+            .filter(|(id, _)| keep(*id))
+            .map(|(id, v)| (DistanceMetric::Euclidean.compute(v, &query), id))
+            .collect();
+        want.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        want.truncate(k);
+
+        let got = idx.search_with_filter(&query, k, 200, keep);
+        assert_eq!(got, want, "filtered search in flat mode must be exact");
+    }
+
+    /// T064: a tombstoned vector must not occupy a slot in the exact top-`k`;
+    /// the next live vector is promoted instead.
+    #[test]
+    fn flat_mode_promotes_the_next_live_vector_past_a_tombstone() {
+        let (mut idx, query) = flat_index(2_000, 96, 0x70B5);
+        let k = 10;
+        let before = exact_top_k(&idx, &query, k);
+
+        idx.remove(before[0]);
+        let hits = idx.search(&query, k);
+
+        assert_eq!(hits.len(), k, "a tombstone must not shorten the result list");
+        assert!(
+            hits.iter().all(|(_, id)| *id != before[0]),
+            "tombstoned node {} must not be returned",
+            before[0]
+        );
+        let want: Vec<usize> = exact_top_k(&idx, &query, k);
+        let got: Vec<usize> = hits.into_iter().map(|(_, id)| id).collect();
+        assert_eq!(got, want, "the next live vector must be promoted");
+    }
+
     #[test]
     fn test_stats_report() {
-        let mut idx = HnswIndex::new(DistanceMetric::Euclidean);
+        // Graph statistics only exist once the graph is built; a default index
+        // stays flat (see `crossing_the_exact_threshold_builds_the_graph`).
+        let mut idx = HnswIndex::with_exact_threshold(DistanceMetric::Euclidean, 0);
         for i in 0..50 {
             idx.insert(vec![i as f32, i as f32], i);
         }
