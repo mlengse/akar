@@ -159,12 +159,26 @@ impl Connection {
             _ => {}
         }
 
-        // P52.38: after a successful write, rebuild the HNSW graph of any vector
-        // index on the written node tables so it reflects the current rows.
+        // Post-commit vector index maintenance (WP-A1 / T014, T015).
         if query_result.is_ok() && Connection::is_write_statement(bound) {
             let written = Connection::extract_write_tables(bound);
             if !written.is_empty() {
-                self.database.refresh_vector_indexes(&written);
+                let rows = self
+                    .last_write_rows
+                    .lock()
+                    .map(|mut r| std::mem::take(&mut *r))
+                    .unwrap_or_default();
+                if !rows.is_empty() {
+                    self.database.refresh_vector_indexes_for_rows(&rows);
+                } else {
+                    tracing::debug!(
+                        statement = ?bound,
+                        tables = ?written,
+                        "Statement wrote to tables {:?} but reported no row ids; falling back to full table refresh",
+                        written
+                    );
+                    self.database.refresh_vector_indexes(&written);
+                }
             }
         }
 
@@ -252,11 +266,14 @@ impl Connection {
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
 
-        // Record row-level writes for OCC conflict detection
+        // Capture written rows once into last_write_rows and record for OCC (T014)
+        let written_rows = processor.take_written_rows();
+        if let Ok(mut lwr) = self.last_write_rows.lock() {
+            *lwr = written_rows.clone();
+        }
         if let Some(ref txn) = txn_opt {
-            let written_rows = processor.take_written_rows();
             let tm = &self.database.transaction_manager;
-            for (table_id, row_id) in written_rows {
+            for &(table_id, row_id) in &written_rows {
                 tm.record_write(txn.transaction_id, table_id, row_id);
             }
         }
@@ -444,11 +461,14 @@ impl Connection {
             }
         };
 
-        // Record row-level writes for OCC conflict detection
+        // Capture written rows once into last_write_rows and record for OCC (T014)
+        let written_rows = processor.take_written_rows();
+        if let Ok(mut lwr) = self.last_write_rows.lock() {
+            *lwr = written_rows.clone();
+        }
         if let Some(ref txn) = txn_opt {
-            let written_rows = processor.take_written_rows();
             let tm = &self.database.transaction_manager;
-            for (table_id, row_id) in written_rows {
+            for &(table_id, row_id) in &written_rows {
                 tm.record_write(txn.transaction_id, table_id, row_id);
             }
         }
@@ -573,9 +593,13 @@ impl Connection {
             .execute(&optimized_plan)
             .map_err(|e| format!("Execute error: {e}"))?;
 
-        // Record row-level writes for OCC conflict detection.
+        // Record row-level writes for OCC conflict detection and post-commit refresh (T014).
+        let written_rows = processor.take_written_rows();
+        if let Ok(mut lwr) = self.last_write_rows.lock() {
+            *lwr = written_rows.clone();
+        }
         let tm = &self.database.transaction_manager;
-        for (table_id, row_id) in processor.take_written_rows() {
+        for &(table_id, row_id) in &written_rows {
             tm.record_write(txn.transaction_id, table_id, row_id);
         }
 

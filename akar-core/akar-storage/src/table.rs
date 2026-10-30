@@ -52,8 +52,8 @@ pub struct NodeTable {
     /// Optional ART (Adaptive Radix Tree) index for PK range scans.
     /// When present, `insert_row()` also updates this index automatically.
     pub art_index: Option<ArtPrimaryKeyIndex>,
-    /// Set when an UPDATE/DELETE touches the table. The durable column mirror
-    /// (see `persistence.rs`) performs a full rewrite when this flag is set.
+    /// Set of column indices modified by an UPDATE/DELETE. The durable column mirror
+    /// (see `persistence.rs`) flushes only the named dirty columns rather than performing a full rewrite.
     pub dirty_columns: HashSet<usize>,
     pub persistence_dirty: bool,
     /// Optional spiller for memory-bounded bulk ingest. When set, newly
@@ -937,8 +937,8 @@ pub struct RelTable {
     pub csr_index: Option<CsrIndex>,
     /// Column-major property storage: properties[col_idx][edge_idx].
     pub properties: Vec<Vec<Value>>,
-    /// Set when an UPDATE/DELETE touches the table. The durable column mirror
-    /// (see `persistence.rs`) performs a full rewrite when this flag is set.
+    /// Set of column indices modified by an UPDATE/DELETE. The durable column mirror
+    /// (see `persistence.rs`) flushes only the named dirty columns rather than performing a full rewrite.
     pub dirty_columns: HashSet<usize>,
     pub persistence_dirty: bool,
 }
@@ -1352,6 +1352,24 @@ impl RelTable {
 /// Write operations synchronize on individual entries rather than
 /// the entire catalog, allowing concurrent writers to different
 /// tables to proceed in parallel.
+/// Outcome of vector index maintenance (rows examined, inserted, replaced, tombstoned).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MaintenanceOutcome {
+    pub rows_examined: usize,
+    pub rows_inserted: usize,
+    pub rows_replaced: usize,
+    pub rows_tombstoned: usize,
+}
+
+impl MaintenanceOutcome {
+    pub fn merge(&mut self, other: &Self) {
+        self.rows_examined += other.rows_examined;
+        self.rows_inserted += other.rows_inserted;
+        self.rows_replaced += other.rows_replaced;
+        self.rows_tombstoned += other.rows_tombstoned;
+    }
+}
+
 #[derive(Default)]
 pub struct TableCatalog {
     node_tables: DashMap<u64, NodeTable>,
@@ -1835,60 +1853,146 @@ impl TableCatalog {
         }
     }
 
-    /// Rebuild a vector index from the current contents of its node table.
+    /// Reconcile only the specified `(table_id, row_id)` rows across vector indexes.
     ///
-    /// The HNSW graph is re-populated with the live row ids and vectors, so
-    /// INSERT/DELETE after `CREATE VECTOR INDEX` are always reflected (P52.38).
-    pub fn refresh_vector_index(&self, index_id: u64) {
-        let (table_name, column_name) = match self.vector_indexes.get(&index_id) {
-            Some(vi) => (vi.table_name.clone(), vi.column_name.clone()),
-            None => return,
+    /// Groups the pairs by table and index, re-reads only the named rows, inserts
+    /// when absent, replaces when the stored vector differs, and tombstones when the
+    /// cell is null or the row was deleted (WP-A1 / T010).
+    pub fn refresh_vector_index_rows(&self, rows: &[(u64, u64)]) -> MaintenanceOutcome {
+        if rows.is_empty() {
+            return MaintenanceOutcome::default();
+        }
+
+        let mut outcome = MaintenanceOutcome::default();
+
+        // Group row_ids by table_id (deduping within each table)
+        let mut table_rows: HashMap<u64, Vec<u64>> = HashMap::new();
+        for &(table_id, row_id) in rows {
+            let entry = table_rows.entry(table_id).or_default();
+            if !entry.contains(&row_id) {
+                entry.push(row_id);
+            }
+        }
+
+        for (table_id, row_ids) in table_rows {
+            let Some(table) = self.get_node_table(table_id) else {
+                continue;
+            };
+            let table_name = table.name.clone();
+
+            let index_ids: Vec<u64> = self
+                .vector_indexes
+                .iter()
+                .filter(|vi| vi.table_name == table_name)
+                .map(|vi| *vi.key())
+                .collect();
+
+            if index_ids.is_empty() {
+                continue;
+            }
+
+            for index_id in index_ids {
+                let partial = self.reconcile_vector_index_rows_inner(index_id, &table, &row_ids);
+                outcome.merge(&partial);
+            }
+        }
+
+        outcome
+    }
+
+    /// Inner helper to reconcile a specific vector index against a list of row_ids.
+    fn reconcile_vector_index_rows_inner(
+        &self,
+        index_id: u64,
+        table: &NodeTable,
+        row_ids: &[u64],
+    ) -> MaintenanceOutcome {
+        let column_name = match self.vector_indexes.get(&index_id) {
+            Some(vi) => vi.column_name.clone(),
+            None => return MaintenanceOutcome::default(),
         };
 
-        let col_idx = match self.get_node_table_by_name(&table_name) {
-            Some(t) => match t.columns.iter().position(|c| c.name == column_name) {
-                Some(idx) => idx,
-                None => return,
-            },
-            None => return,
+        let col_idx = match table.columns.iter().position(|c| c.name == column_name) {
+            Some(idx) => idx,
+            None => return MaintenanceOutcome::default(),
         };
 
-        let Some(table) = self.get_node_table_by_name(&table_name) else {
-            return;
+        let mut outcome = MaintenanceOutcome {
+            rows_examined: row_ids.len(),
+            rows_inserted: 0,
+            rows_replaced: 0,
+            rows_tombstoned: 0,
         };
-        let mut updates: Vec<(usize, Option<Vec<f32>>)> = Vec::new();
-        for row_id in 0..table.num_rows as usize {
-            match table.get_value(row_id, col_idx) {
-                Some(val) if !matches!(val, Value::Null) => {
-                    if let Ok(vec) = crate::extract_f32_list_from_value(val) {
-                        updates.push((row_id, Some(vec)));
-                    } else {
+
+        let mut updates: Vec<(usize, Option<Vec<f32>>)> = Vec::with_capacity(row_ids.len());
+        for &r in row_ids {
+            let row_id = r as usize;
+            if row_id < table.num_rows as usize {
+                match table.get_value(row_id, col_idx) {
+                    Some(val) if !matches!(val, Value::Null) => {
+                        if let Ok(vec) = crate::extract_f32_list_from_value(val) {
+                            updates.push((row_id, Some(vec)));
+                        } else {
+                            updates.push((row_id, None));
+                        }
+                    }
+                    _ => {
                         updates.push((row_id, None));
                     }
                 }
-                _ => {
-                    updates.push((row_id, None));
-                }
+            } else {
+                updates.push((row_id, None));
             }
         }
-        drop(table);
 
         if let Some(mut vi) = self.vector_indexes.get_mut(&index_id) {
             for (row_id, maybe_vec) in updates {
                 match maybe_vec {
                     Some(vec) => {
-                        let already_indexed =
-                            vi.hnsw().get_vector(row_id) == Some(vec.as_slice()) && !vi.hnsw().is_deleted(row_id);
-                        if !already_indexed {
+                        let existing = vi.hnsw().get_vector(row_id);
+                        let is_del = vi.hnsw().is_deleted(row_id);
+                        if existing == Some(vec.as_slice()) && !is_del {
+                            // Unchanged, nothing to do
+                        } else if existing.is_some() && !is_del {
+                            // Replaced
                             vi.hnsw_mut().insert(vec, row_id);
+                            outcome.rows_replaced += 1;
+                        } else {
+                            // Inserted
+                            vi.hnsw_mut().insert(vec, row_id);
+                            outcome.rows_inserted += 1;
                         }
                     }
                     None => {
-                        vi.hnsw_mut().remove(row_id);
+                        let existing = vi.hnsw().get_vector(row_id);
+                        let is_del = vi.hnsw().is_deleted(row_id);
+                        if existing.is_some() && !is_del {
+                            vi.hnsw_mut().remove(row_id);
+                            outcome.rows_tombstoned += 1;
+                        } else {
+                            vi.hnsw_mut().remove(row_id);
+                        }
                     }
                 }
             }
         }
+
+        outcome
+    }
+
+    /// Rebuild a vector index from the current contents of its node table.
+    ///
+    /// Delegates to the all-rows form of the reconcile (WP-A1 / T011).
+    pub fn refresh_vector_index(&self, index_id: u64) {
+        let table_name = match self.vector_indexes.get(&index_id) {
+            Some(vi) => vi.table_name.clone(),
+            None => return,
+        };
+        let Some(table) = self.get_node_table_by_name(&table_name) else {
+            return;
+        };
+        let row_ids: Vec<u64> = (0..table.num_rows).collect();
+        self.reconcile_vector_index_rows_inner(index_id, &table, &row_ids);
     }
 
     /// Rebuild the vector indexes of all node tables written by a statement.

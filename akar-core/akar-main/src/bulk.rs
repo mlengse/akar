@@ -165,22 +165,31 @@ pub fn insert_nodes<T: TypedNode>(conn: &Connection, rows: &[T], rows_per_statem
     // so a rejected chunk rolls back the chunks already executed (FR-021/022).
     let mut txn = conn.begin_write_txn()?;
     let mut written = 0;
+    let mut batch_rows: Vec<(u64, u64)> = Vec::new();
     let outcome: Result<usize, String> = (|| -> Result<usize, String> {
         for chunk in rows.chunks(rows_per_statement) {
             let payload = encode_chunk::<T>(chunk)?;
             let query_result = conn.execute_in_txn(&mut txn, &prepared, vec![("rows", payload)])?;
             written += written_count(&query_result)?;
+            if let Ok(mut lwr) = conn.last_write_rows.lock() {
+                batch_rows.extend(lwr.drain(..));
+            }
         }
         Ok(written)
     })();
     match outcome {
         Ok(w) => {
             conn.commit_write_txn(&mut txn)?;
-            // The rows became visible only at commit, so rebuild any vector
-            // index on the written tables once per batch (not once per chunk).
+            // The rows became visible only at commit, so reconcile any vector
+            // index on the written tables once per batch (not once per chunk)
+            // using the row-scoped maintenance path (WP-A1 / T016 / FR-004).
             let written_tables = Connection::extract_write_tables(&prepared.bound_statement);
             if !written_tables.is_empty() {
-                conn.database.refresh_vector_indexes(&written_tables);
+                if !batch_rows.is_empty() {
+                    conn.database.refresh_vector_indexes_for_rows(&batch_rows);
+                } else {
+                    conn.database.refresh_vector_indexes(&written_tables);
+                }
             }
             Ok(w)
         }

@@ -450,9 +450,9 @@ impl Database {
 
     /// Rebuild the HNSW graph of every vector index on the given tables.
     ///
-    /// The index was only populated during `CREATE VECTOR INDEX`; without this
-    /// hook the graph served stale/positional row ids after INSERT/DELETE
-    /// (P52.38).
+    /// This is the table-wide repair/rebuild entry point whose cost is O(rows)
+    /// in the table. Ordinary post-write maintenance uses the row-scoped entry point
+    /// [`Database::refresh_vector_indexes_for_rows`] (R7: signature unchanged, no SemVer break).
     #[cfg(feature = "vector-extension")]
     pub fn refresh_vector_indexes(&self, table_ids: &[u64]) {
         self.storage_manager
@@ -463,6 +463,22 @@ impl Database {
     /// No-op when the vector extension is not compiled in.
     #[cfg(not(feature = "vector-extension"))]
     pub fn refresh_vector_indexes(&self, _table_ids: &[u64]) {}
+
+    /// Reconcile only the specified `(table_id, row_id)` rows across vector indexes.
+    ///
+    /// Re-reads only the named rows; cost is O(scope) (WP-A1 / T012).
+    #[cfg(feature = "vector-extension")]
+    pub fn refresh_vector_indexes_for_rows(&self, rows: &[(u64, u64)]) -> akar_storage::table::MaintenanceOutcome {
+        self.storage_manager
+            .table_catalog()
+            .refresh_vector_index_rows(rows)
+    }
+
+    /// No-op when the vector extension is not compiled in.
+    #[cfg(not(feature = "vector-extension"))]
+    pub fn refresh_vector_indexes_for_rows(&self, _rows: &[(u64, u64)]) -> akar_storage::table::MaintenanceOutcome {
+        akar_storage::table::MaintenanceOutcome::default()
+    }
 
     /// Create an ART index on a node table: data index.
     ///

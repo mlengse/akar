@@ -97,6 +97,8 @@ pub struct Connection {
     /// strong `Arc<Database>` captures do not create a reference cycle that
     /// would keep the database (and its file lock) alive forever (P51.47).
     processor_handlers: std::sync::OnceLock<Arc<crate::connection::query::ProcessorHandlers>>,
+    /// Written (table_id, row_id) pairs captured from the last write statement (WP-A1 / T014).
+    pub(crate) last_write_rows: Mutex<Vec<(u64, u64)>>,
 }
 
 impl Connection {
@@ -114,6 +116,7 @@ impl Connection {
             explicit_txn_active: std::sync::atomic::AtomicBool::new(false),
             executed_statements: std::sync::atomic::AtomicU64::new(0),
             processor_handlers: std::sync::OnceLock::new(),
+            last_write_rows: Mutex::new(Vec::new()),
         }
     }
 

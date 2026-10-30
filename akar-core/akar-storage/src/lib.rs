@@ -53,6 +53,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wal::WAL;
 
+pub use table::MaintenanceOutcome;
 pub use art_index::ArtPrimaryKeyIndex;
 pub use art_key::ArtKey;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
