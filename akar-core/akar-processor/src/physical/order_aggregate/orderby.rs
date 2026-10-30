@@ -112,12 +112,7 @@ impl PhysicalOperatorExec for PhysicalOrderBy {
                     .sort_keys
                     .iter()
                     .filter(|&&(col, _)| (col as usize) < num_fields)
-                    .filter_map(|&(col, asc)| {
-                        sort_cols
-                            .iter()
-                            .position(|&c| c == col)
-                            .map(|idx| (idx as u32, asc))
-                    })
+                    .filter_map(|&(col, asc)| sort_cols.iter().position(|&c| c == col).map(|idx| (idx as u32, asc)))
                     .collect();
                 let sorter = BlockMergeSorter::new(block_size, compact_keys);
                 sorter.sort(&key_values, sort_cols.len())

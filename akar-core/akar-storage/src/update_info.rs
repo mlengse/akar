@@ -131,7 +131,12 @@ impl UpdateInfo {
 
     /// Number of vectors with at least one update.
     pub fn num_dirty_vectors(&self) -> usize {
-        self.vectors.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|v| v.is_some()).count()
+        self.vectors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|v| v.is_some())
+            .count()
     }
 }
 

@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use akar_vector::hnsw::{DistanceMetric, HnswIndex};
+use std::collections::HashSet;
 
 #[test]
 fn test_algorithm4_diversity_heuristic() {
@@ -63,7 +63,7 @@ fn test_hnsw_recall_against_brute_force() {
     let dims = 16;
     let mut rng: u64 = 424242;
 
-    let mut random_vec = |rng: &mut u64| -> Vec<f32> {
+    let random_vec = |rng: &mut u64| -> Vec<f32> {
         let mut v = Vec::with_capacity(dims);
         for _ in 0..dims {
             *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -106,8 +106,5 @@ fn test_hnsw_recall_against_brute_force() {
     }
 
     let avg_recall = total_overlap as f64 / (num_queries * k) as f64;
-    assert!(
-        avg_recall >= 0.85,
-        "HNSW average recall {avg_recall} must be >= 0.85"
-    );
+    assert!(avg_recall >= 0.85, "HNSW average recall {avg_recall} must be >= 0.85");
 }

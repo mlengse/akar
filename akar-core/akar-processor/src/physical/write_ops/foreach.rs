@@ -84,12 +84,7 @@ impl PhysicalOperatorExec for PhysicalForeach {
                     .vfs
                     .clone()
                     .ok_or_else(|| ProcessorError::Execution("Missing VFS in FOREACH".into()))?;
-                let processor = crate::processor::QueryProcessor::with_catalog(
-                    func_reg,
-                    table_cat,
-                    None,
-                    vfs,
-                );
+                let processor = crate::processor::QueryProcessor::with_catalog(func_reg, table_cat, None, vfs);
                 let _result = processor.execute(sub_plan)?;
             }
         }

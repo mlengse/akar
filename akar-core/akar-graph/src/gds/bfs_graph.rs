@@ -501,8 +501,16 @@ impl BFSGraphManager {
         static EMPTY_DENSE: std::sync::LazyLock<DenseBFSGraph> = std::sync::LazyLock::new(|| DenseBFSGraph::new(0));
         static EMPTY_SPARSE: std::sync::LazyLock<SparseBFSGraph> = std::sync::LazyLock::new(SparseBFSGraph::new);
         match self.state {
-            GDSDensityState::Dense => self.dense_graph.as_ref().map(|g| g as &dyn BaseBFSGraph).unwrap_or(&*EMPTY_DENSE),
-            GDSDensityState::Sparse => self.sparse_graph.as_ref().map(|g| g as &dyn BaseBFSGraph).unwrap_or(&*EMPTY_SPARSE),
+            GDSDensityState::Dense => self
+                .dense_graph
+                .as_ref()
+                .map(|g| g as &dyn BaseBFSGraph)
+                .unwrap_or(&*EMPTY_DENSE),
+            GDSDensityState::Sparse => self
+                .sparse_graph
+                .as_ref()
+                .map(|g| g as &dyn BaseBFSGraph)
+                .unwrap_or(&*EMPTY_SPARSE),
         }
     }
 

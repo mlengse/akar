@@ -96,7 +96,9 @@ pub fn cjk_analyzer() -> TextAnalyzer {
     // construction (min_gram > 0 and min_gram <= max_gram).
     match NgramTokenizer::all_ngrams(1, 2) {
         Ok(ngram) => TextAnalyzer::builder(ngram).filter(LowerCaser).build(),
-        Err(_) => TextAnalyzer::builder(SimpleTokenizer::default()).filter(LowerCaser).build(),
+        Err(_) => TextAnalyzer::builder(SimpleTokenizer::default())
+            .filter(LowerCaser)
+            .build(),
     }
 }
 

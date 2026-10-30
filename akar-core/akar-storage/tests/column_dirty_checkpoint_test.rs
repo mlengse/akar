@@ -24,11 +24,7 @@ const UPDATED_ROW: usize = 37;
 fn columns() -> Vec<ColumnDefinition> {
     (0..NUM_COLUMNS)
         .map(|ci| ColumnDefinition {
-            name: if ci == 0 {
-                "id".into()
-            } else {
-                format!("col_{ci}")
-            },
+            name: if ci == 0 { "id".into() } else { format!("col_{ci}") },
             logical_type: LogicalTypeID::Int64,
             is_primary_key: ci == 0,
             compression: CompressionType::Uncompressed,
@@ -46,9 +42,7 @@ fn buffer_manager(db_path: &Path) -> Arc<Mutex<BufferManager>> {
 }
 
 fn row(id: i64) -> Vec<Value> {
-    (0..NUM_COLUMNS)
-        .map(|ci| Value::Int64(id * 100 + ci as i64))
-        .collect()
+    (0..NUM_COLUMNS).map(|ci| Value::Int64(id * 100 + ci as i64)).collect()
 }
 
 /// FNV-1a over file bytes — enough to detect an unchanged mirror file.
@@ -146,11 +140,7 @@ fn test_single_column_dirty_flush() {
                 .strip_prefix(&format!("col_{TABLE_ID}_"))
                 .and_then(|rest| rest.split('.').next())
                 .and_then(|ci| ci.parse::<usize>().ok());
-            assert_eq!(
-                column,
-                Some(UPDATED_COLUMN),
-                "unexpected mirror file rewritten: {name}"
-            );
+            assert_eq!(column, Some(UPDATED_COLUMN), "unexpected mirror file rewritten: {name}");
             changed_columns.push(name.to_string());
         }
     }

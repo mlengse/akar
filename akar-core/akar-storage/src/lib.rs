@@ -297,7 +297,11 @@ impl StorageManager {
         if self.db_path.to_string_lossy() == ":memory:" {
             return Ok(()); // In-memory databases have nothing to persist
         }
-        let page_size = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner()).page_size();
+        let page_size = self
+            .buffer_manager
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .page_size();
         self.table_persistence
             .persist_all(&self.table_catalog, &self.db_path, &self.buffer_manager, page_size)
     }
@@ -310,7 +314,11 @@ impl StorageManager {
         if self.db_path.to_string_lossy() == ":memory:" {
             return Ok(0); // In-memory databases have no persisted mirrors
         }
-        let page_size = self.buffer_manager.lock().unwrap_or_else(|e| e.into_inner()).page_size();
+        let page_size = self
+            .buffer_manager
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .page_size();
         self.table_persistence
             .load_all(&self.table_catalog, &self.db_path, &self.buffer_manager, page_size)
     }

@@ -620,8 +620,14 @@ fn build_optimal_tree(
             cardinality: state.cardinality as u64,
         })
     } else {
-        let left_card = dp.get(state.left_mask).and_then(|s| s.as_ref()).map_or(0.0, |s| s.cardinality);
-        let right_card = dp.get(state.right_mask).and_then(|s| s.as_ref()).map_or(0.0, |s| s.cardinality);
+        let left_card = dp
+            .get(state.left_mask)
+            .and_then(|s| s.as_ref())
+            .map_or(0.0, |s| s.cardinality);
+        let right_card = dp
+            .get(state.right_mask)
+            .and_then(|s| s.as_ref())
+            .map_or(0.0, |s| s.cardinality);
 
         if left_card >= right_card {
             LogicalOperator::HashJoin(LogicalHashJoin {

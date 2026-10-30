@@ -357,7 +357,10 @@ impl VectorIndexTable {
                 let dims = vec_len / 4;
                 let mut vec_data = Vec::with_capacity(dims);
                 for i in 0..dims {
-                    let f = match page_data.get(pos + i * 4..pos + (i + 1) * 4).and_then(|s| s.try_into().ok()) {
+                    let f = match page_data
+                        .get(pos + i * 4..pos + (i + 1) * 4)
+                        .and_then(|s| s.try_into().ok())
+                    {
                         Some(b) => f32::from_le_bytes(b),
                         None => break,
                     };

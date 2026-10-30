@@ -279,7 +279,12 @@ impl TablePersistence {
                     Self::append_mirror_value(col, &mut entry.oversized[ci], row as u64, &value)?;
                 }
             }
-            let mut dirty: Vec<usize> = table.dirty_columns.iter().copied().filter(|ci| *ci < num_cols).collect();
+            let mut dirty: Vec<usize> = table
+                .dirty_columns
+                .iter()
+                .copied()
+                .filter(|ci| *ci < num_cols)
+                .collect();
             dirty.sort_unstable();
             for ci in dirty {
                 Self::drop_column_mirror(table.table_id, ci, db_path, bm);

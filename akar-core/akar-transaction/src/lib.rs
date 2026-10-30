@@ -833,9 +833,7 @@ impl TransactionManager {
             transaction.commit_ts = Some(commit_ts);
             self.lifecycle.deregister(transaction.transaction_id);
             self.concurrency.release_locks(transaction.transaction_id);
-            return Ok(CommitResult::Committed {
-                commit_ts,
-            });
+            return Ok(CommitResult::Committed { commit_ts });
         }
 
         // OCC: validate write set before committing
@@ -888,9 +886,7 @@ impl TransactionManager {
             transaction.commit_ts = Some(commit_ts);
             self.lifecycle.deregister(transaction.transaction_id);
             self.concurrency.release_locks(transaction.transaction_id);
-            return Ok(CommitResult::Committed {
-                commit_ts,
-            });
+            return Ok(CommitResult::Committed { commit_ts });
         }
 
         // OCC: validate write set before any durable work is done.

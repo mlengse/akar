@@ -130,7 +130,6 @@ impl NodeTable {
             group.columns.push(chunk);
         }
 
-
         self.persistence_dirty = true;
     }
 
@@ -206,9 +205,10 @@ impl NodeTable {
             self.node_groups.push(new_group);
         }
 
-        let current = self.node_groups.last_mut().ok_or_else(|| {
-            StorageError::LocalStorage("expected active node group".to_string())
-        })?;
+        let current = self
+            .node_groups
+            .last_mut()
+            .ok_or_else(|| StorageError::LocalStorage("expected active node group".to_string()))?;
         // Enable version info on existing group if needed
         if txn_id.is_some() {
             current.enable_version_info();
@@ -222,7 +222,6 @@ impl NodeTable {
         // (P61.3) A row was appended in memory; mark the table dirty so the
         // next persist (checkpoint/sync) writes it to the durable column
         // mirrors even when the WAL holds no Insert record for it.
-
 
         self.persistence_dirty = true;
 
@@ -325,9 +324,10 @@ impl NodeTable {
         // Append to the last group (spilling into new groups if needed)
         let mut inserted = 0usize;
         while inserted < total_new {
-            let current = self.node_groups.last_mut().ok_or_else(|| {
-                StorageError::LocalStorage("expected active node group".to_string())
-            })?;
+            let current = self
+                .node_groups
+                .last_mut()
+                .ok_or_else(|| StorageError::LocalStorage("expected active node group".to_string()))?;
             if txn_id.is_some() {
                 current.enable_version_info();
             }
@@ -360,7 +360,6 @@ impl NodeTable {
         // (P61.3) Rows were appended in memory; mark the table dirty so the
         // durable column mirrors capture them at the next persist even if no
         // WAL Insert records exist for this batch.
-
 
         self.persistence_dirty = true;
 
@@ -564,7 +563,6 @@ impl NodeTable {
             )));
         }
 
-
         self.persistence_dirty = true;
 
         let mut offset = 0u64;
@@ -601,7 +599,6 @@ impl NodeTable {
                 self.num_rows
             )));
         }
-
 
         self.persistence_dirty = true;
 
@@ -981,7 +978,6 @@ impl RelTable {
         self.columns.push(column);
         self.properties.push(vec![Value::Null; self.edges.len()]);
 
-
         self.persistence_dirty = true;
     }
 
@@ -1038,7 +1034,6 @@ impl RelTable {
         self.num_rows += 1;
         // (P61.3) Mark the rel table dirty so the durable mirror is rewritten
         // even when no WAL insert record exists for this edge.
-
 
         self.persistence_dirty = true;
         Ok(())
@@ -1114,7 +1109,6 @@ impl RelTable {
         // (P61.3) Mark the rel table dirty so the durable mirror captures the
         // new edges even when no WAL insert records exist for this batch.
 
-
         self.persistence_dirty = true;
         Ok(total as u64)
     }
@@ -1145,7 +1139,6 @@ impl RelTable {
         // Tombstone the edge
         self.edges[edge_idx] = (u64::MAX, u64::MAX);
 
-
         self.persistence_dirty = true;
 
         // Nullify properties
@@ -1168,7 +1161,6 @@ impl RelTable {
         }
 
         self.properties[col_idx][edge_idx] = value;
-
 
         self.persistence_dirty = true;
         Ok(())
@@ -1224,7 +1216,6 @@ impl RelTable {
                 }
             }
         }
-
 
         self.persistence_dirty = true;
         Ok(())
@@ -1886,11 +1877,8 @@ impl TableCatalog {
             for (row_id, maybe_vec) in updates {
                 match maybe_vec {
                     Some(vec) => {
-                        let already_indexed = vi
-                            .hnsw()
-                            .get_vector(row_id)
-                            .map_or(false, |ev| ev == vec.as_slice())
-                            && !vi.hnsw().is_deleted(row_id);
+                        let already_indexed =
+                            vi.hnsw().get_vector(row_id) == Some(vec.as_slice()) && !vi.hnsw().is_deleted(row_id);
                         if !already_indexed {
                             vi.hnsw_mut().insert(vec, row_id);
                         }

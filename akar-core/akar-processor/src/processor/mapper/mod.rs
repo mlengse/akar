@@ -164,12 +164,17 @@ impl<'p> ExecutionContext<'p> {
                         .into_iter()
                         .map(|mut group_arrays| {
                             if group_arrays.len() == 1 {
-                                group_arrays.pop().unwrap_or_else(|| std::sync::Arc::new(arrow::array::NullArray::new(0)))
+                                group_arrays
+                                    .pop()
+                                    .unwrap_or_else(|| std::sync::Arc::new(arrow::array::NullArray::new(0)))
                             } else {
                                 let refs: Vec<&dyn arrow::array::Array> =
                                     group_arrays.iter().map(|a| a.as_ref()).collect();
-                                arrow::compute::concat(&refs)
-                                    .unwrap_or_else(|_| group_arrays.pop().unwrap_or_else(|| std::sync::Arc::new(arrow::array::NullArray::new(0))))
+                                arrow::compute::concat(&refs).unwrap_or_else(|_| {
+                                    group_arrays
+                                        .pop()
+                                        .unwrap_or_else(|| std::sync::Arc::new(arrow::array::NullArray::new(0)))
+                                })
                             }
                         })
                         .collect();

@@ -11,8 +11,8 @@ use akar_common::memory::MemoryManager;
 use akar_common::types::{LogicalTypeID, Value};
 use akar_processor::physical::index_scan::PhysicalIndexScan;
 use akar_processor::physical::types::PhysicalOperatorExec;
-use akar_storage::table::ColumnDefinition;
 use akar_storage::StorageManager;
+use akar_storage::table::ColumnDefinition;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -67,14 +67,8 @@ fn setup() -> (Arc<StorageManager>, TempDir) {
         )
         .expect("insert row");
     }
-    sm.create_secondary_index(
-        INDEX.into(),
-        TABLE.into(),
-        "status".into(),
-        IndexType::Hash,
-        false,
-    )
-    .expect("create secondary index");
+    sm.create_secondary_index(INDEX.into(), TABLE.into(), "status".into(), IndexType::Hash, false)
+        .expect("create secondary index");
     (sm, dir)
 }
 
@@ -129,9 +123,7 @@ fn test_physical_index_scan_verifies_live_rows() {
     // (a) A soft-deleted row keeps its index entry until the write path removes
     // it. Liveness (PK != NULL) alone must hide it.
     {
-        let mut table = catalog
-            .get_node_table_by_name_mut(TABLE)
-            .expect("node table present");
+        let mut table = catalog.get_node_table_by_name_mut(TABLE).expect("node table present");
         table.delete_row_with_txn(5, None).expect("soft delete row 5");
     }
     assert_eq!(
@@ -143,9 +135,7 @@ fn test_physical_index_scan_verifies_live_rows() {
     // (b) A raw column change that skipped index maintenance leaves the row
     // under its old key. Column re-verification must reject it.
     {
-        let mut table = catalog
-            .get_node_table_by_name_mut(TABLE)
-            .expect("node table present");
+        let mut table = catalog.get_node_table_by_name_mut(TABLE).expect("node table present");
         table
             .update_cell(6, 1, Value::String("archived".into()))
             .expect("update row 6");
@@ -200,9 +190,7 @@ fn test_physical_index_scan_falls_back_while_building() {
 
     // The fallback also applies liveness: a deleted row stays hidden.
     {
-        let mut table = catalog
-            .get_node_table_by_name_mut(TABLE)
-            .expect("node table present");
+        let mut table = catalog.get_node_table_by_name_mut(TABLE).expect("node table present");
         table.delete_row_with_txn(0, None).expect("soft delete row 0");
     }
     assert_eq!(

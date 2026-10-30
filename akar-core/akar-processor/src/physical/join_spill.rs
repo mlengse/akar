@@ -411,7 +411,10 @@ fn concat_or_first(mut parts: Vec<ArrayRef>) -> ArrayRef {
     }
     let refs: Vec<&dyn Array> = parts.iter().map(|a| a.as_ref()).collect();
     arrow::compute::concat(&refs).unwrap_or_else(|_| {
-        parts.first().cloned().unwrap_or_else(|| Arc::new(arrow::array::NullArray::new(0)))
+        parts
+            .first()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(arrow::array::NullArray::new(0)))
     })
 }
 

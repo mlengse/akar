@@ -440,7 +440,7 @@ impl HnswIndex {
             };
             let closer_to_query_than_selected = selected.iter().all(|&sel_id| {
                 self.get_node_vec(sel_id, pending)
-                    .map_or(true, |sel_vec| cand_dist < self.metric.compute(cand_vec, sel_vec))
+                    .is_none_or(|sel_vec| cand_dist < self.metric.compute(cand_vec, sel_vec))
             });
             if closer_to_query_than_selected {
                 selected.push(cand_id);

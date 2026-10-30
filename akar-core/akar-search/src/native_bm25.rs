@@ -106,13 +106,7 @@ impl NativeBm25Index {
             } else {
                 let mut postings = Postings::new();
                 postings.insert(id, (tf, doc_len_u32));
-                self.terms.insert(
-                    term.to_string(),
-                    TermIndex {
-                        df: 1,
-                        postings,
-                    },
-                );
+                self.terms.insert(term.to_string(), TermIndex { df: 1, postings });
             }
         }
         self.total_tokens += doc_len as u64;

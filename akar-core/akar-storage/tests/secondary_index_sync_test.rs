@@ -8,12 +8,12 @@
 //! operations and asserts the index contents stay exactly equal to a
 //! recomputation from the table.
 
+use akar_catalog::IndexType;
 use akar_common::enums::CompressionType;
 use akar_common::memory::MemoryManager;
 use akar_common::types::{LogicalTypeID, Value};
-use akar_catalog::IndexType;
-use akar_storage::table::{ColumnDefinition, TableCatalog};
 use akar_storage::StorageManager;
+use akar_storage::table::{ColumnDefinition, TableCatalog};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -91,9 +91,7 @@ fn insert(sm: &StorageManager, id: i64, status: &str) -> u64 {
 fn set_status(sm: &StorageManager, row_id: u64, old: &str, new: &str) {
     let catalog = sm.table_catalog();
     {
-        let mut table = catalog
-            .get_node_table_by_name_mut(TABLE)
-            .expect("node table present");
+        let mut table = catalog.get_node_table_by_name_mut(TABLE).expect("node table present");
         table
             .update_cell(row_id, 1, Value::String(new.to_string()))
             .expect("update status cell");
@@ -104,9 +102,7 @@ fn set_status(sm: &StorageManager, row_id: u64, old: &str, new: &str) {
 fn delete(sm: &StorageManager, row_id: u64) {
     let catalog = sm.table_catalog();
     {
-        let mut table = catalog
-            .get_node_table_by_name_mut(TABLE)
-            .expect("node table present");
+        let mut table = catalog.get_node_table_by_name_mut(TABLE).expect("node table present");
         table.delete_row_with_txn(row_id, None).expect("soft delete row");
     }
     catalog.remove_secondary_index_row(TABLE, row_id);
@@ -157,14 +153,8 @@ fn test_secondary_index_delete_and_update() {
         let row = insert(&sm, id, status);
         live.insert(id, (row, status.to_string()));
     }
-    sm.create_secondary_index(
-        INDEX.into(),
-        TABLE.into(),
-        "status".into(),
-        IndexType::Hash,
-        false,
-    )
-    .expect("create secondary index");
+    sm.create_secondary_index(INDEX.into(), TABLE.into(), "status".into(), IndexType::Hash, false)
+        .expect("create secondary index");
     assert_index_matches_table(&sm, &live, "after backfill");
 
     // Delete: the index must stop returning the soft-deleted row.
@@ -193,14 +183,8 @@ fn test_secondary_index_delete_and_update() {
 #[test]
 fn test_secondary_index_randomized_delete_update_lookup() {
     let (sm, _dir) = setup();
-    sm.create_secondary_index(
-        INDEX.into(),
-        TABLE.into(),
-        "status".into(),
-        IndexType::Hash,
-        false,
-    )
-    .expect("create secondary index");
+    sm.create_secondary_index(INDEX.into(), TABLE.into(), "status".into(), IndexType::Hash, false)
+        .expect("create secondary index");
 
     let mut rng = Rng(0x5EED_0210);
     let mut live: BTreeMap<i64, (u64, String)> = BTreeMap::new();
@@ -251,12 +235,13 @@ fn test_secondary_index_randomized_delete_update_lookup() {
 
     // 1,000 operations later the index must still agree with the table exactly.
     let catalog = sm.table_catalog();
-    let table = catalog
-        .get_node_table_by_name(TABLE)
-        .expect("node table present");
+    let table = catalog.get_node_table_by_name(TABLE).expect("node table present");
     let mut expected_live = 0usize;
     for row in 0..table.num_rows as usize {
-        if table.get_value(row, 0).is_some_and(|value| !matches!(*value, Value::Null)) {
+        if table
+            .get_value(row, 0)
+            .is_some_and(|value| !matches!(*value, Value::Null))
+        {
             expected_live += 1;
         }
     }
@@ -270,6 +255,9 @@ fn test_secondary_index_randomized_delete_update_lookup() {
     // And the re-derived key → offsets map covers every live row exactly once.
     let mut seen: HashMap<u64, String> = HashMap::new();
     for (id, (row, status)) in &live {
-        assert!(seen.insert(*row, status.clone()).is_none(), "row for id {id} indexed twice");
+        assert!(
+            seen.insert(*row, status.clone()).is_none(),
+            "row for id {id} indexed twice"
+        );
     }
 }

@@ -99,11 +99,12 @@ impl StringDictionary {
                 "data too short for dictionary header",
             ));
         }
-        let num_strings = u32::from_le_bytes(
-            data.get(..4)
-                .and_then(|s| s.try_into().ok())
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "data too short for dictionary header"))?,
-        ) as usize;
+        let num_strings = u32::from_le_bytes(data.get(..4).and_then(|s| s.try_into().ok()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "data too short for dictionary header",
+            )
+        })?) as usize;
         let mut dict = Self::with_capacity(num_strings);
         let mut offset = 4usize;
         for _ in 0..num_strings {
@@ -116,7 +117,9 @@ impl StringDictionary {
             let len = u32::from_le_bytes(
                 data.get(offset..offset + 4)
                     .and_then(|s| s.try_into().ok())
-                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "data too short for string length"))?,
+                    .ok_or_else(|| {
+                        std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "data too short for string length")
+                    })?,
             ) as usize;
             offset += 4;
             if offset + len > data.len() {

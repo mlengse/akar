@@ -361,7 +361,10 @@ impl PhysicalScan {
             }
 
             let pred_chunk = DataChunk::new(pred_fields, pred_types).with_names(pred_names);
-            let evaluator_guard = self.evaluator.as_ref().map(|e| e.lock().unwrap_or_else(|err| err.into_inner()));
+            let evaluator_guard = self
+                .evaluator
+                .as_ref()
+                .map(|e| e.lock().unwrap_or_else(|err| err.into_inner()));
             let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, evaluator_guard.as_deref())
                 .map_err(|e| ProcessorError::Execution(format!("Scan predicate evaluation failed: {e}")))?;
 
@@ -523,7 +526,10 @@ impl PhysicalScan {
         let mut final_fields = Vec::new();
         if let Some(ref pred) = self.predicate {
             let pred_chunk = DataChunk::new(pred_chunk_fields, pred_chunk_types).with_names(pred_chunk_names.clone());
-            let evaluator_guard = self.evaluator.as_ref().map(|e| e.lock().unwrap_or_else(|err| err.into_inner()));
+            let evaluator_guard = self
+                .evaluator
+                .as_ref()
+                .map(|e| e.lock().unwrap_or_else(|err| err.into_inner()));
             let mask = PhysicalFilter::evaluate_expression(pred, &pred_chunk, evaluator_guard.as_deref())
                 .map_err(|e| ProcessorError::Execution(format!("Scan predicate evaluation failed: {e}")))?;
 

@@ -598,7 +598,10 @@ impl QueryPlanner {
         let right_plan = self.plan_query(*u.right)?;
 
         let left_op = if left_plan.len() == 1 {
-            left_plan.into_iter().next().ok_or_else(|| PlannerError::Planning("Empty left union plan".into()))?
+            left_plan
+                .into_iter()
+                .next()
+                .ok_or_else(|| PlannerError::Planning("Empty left union plan".into()))?
         } else {
             // Wrap multi-operator pipeline in a projection root
             LogicalOperator::Projection(LogicalProjection {
@@ -609,7 +612,10 @@ impl QueryPlanner {
         };
 
         let right_op = if right_plan.len() == 1 {
-            right_plan.into_iter().next().ok_or_else(|| PlannerError::Planning("Empty right union plan".into()))?
+            right_plan
+                .into_iter()
+                .next()
+                .ok_or_else(|| PlannerError::Planning("Empty right union plan".into()))?
         } else {
             LogicalOperator::Projection(LogicalProjection {
                 expressions: Vec::new(),
@@ -947,7 +953,10 @@ impl QueryPlanner {
                         left_pipeline.push(LogicalOperator::Projection(proj));
                     }
                     if edge_probe {
-                        let edge = om.patterns[0].edge.as_ref().ok_or_else(|| PlannerError::Planning("Missing edge in pattern".into()))?;
+                        let edge = om.patterns[0]
+                            .edge
+                            .as_ref()
+                            .ok_or_else(|| PlannerError::Planning("Missing edge in pattern".into()))?;
                         let src_var = om.patterns[0].node_variable.clone().unwrap_or_default();
                         // Anonymous destination (P53.40 fan-out): empty string
                         // tells the physical operator to emit every incident

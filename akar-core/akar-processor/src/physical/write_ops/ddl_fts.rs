@@ -117,9 +117,12 @@ impl PhysicalOperatorExec for PhysicalCreateFtsIndex {
 
         if self.if_not_exists {
             let already_exists = self.table_catalog.fts_runtime_handle(&self.index_name).is_some()
-                || index_dir.as_deref().map_or(false, |p| p.exists() && p.read_dir().map_or(false, |mut d| d.next().is_some()));
+                || index_dir
+                    .as_deref()
+                    .is_some_and(|p| p.exists() && p.read_dir().is_ok_and(|mut d| d.next().is_some()));
             if already_exists {
-                let mut result_vec = akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::String, 1);
+                let mut result_vec =
+                    akar_common::vector::ValueVector::new(akar_common::types::PhysicalTypeID::String, 1);
                 result_vec.resize(1);
                 result_vec
                     .set_value(

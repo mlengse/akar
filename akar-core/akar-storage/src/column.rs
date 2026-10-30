@@ -361,8 +361,9 @@ impl Column {
 
         self.page_row_offsets = Vec::with_capacity(num_pages);
         for _ in 0..num_pages {
-            self.page_row_offsets
-                .push(u64::from_le_bytes(data.get(pos..pos + 8).and_then(|s| s.try_into().ok()).ok_or_else(err)?));
+            self.page_row_offsets.push(u64::from_le_bytes(
+                data.get(pos..pos + 8).and_then(|s| s.try_into().ok()).ok_or_else(err)?,
+            ));
             pos += 8;
         }
 
@@ -852,7 +853,11 @@ impl Column {
         let mut offsets = [0u32; MAX_VALS_PER_PAGE];
         for (i, offset) in offsets.iter_mut().enumerate().take(num_vals) {
             let off_pos = 4 + i * 4;
-            *offset = u32::from_le_bytes(data.get(off_pos..off_pos + 4).and_then(|s| s.try_into().ok()).ok_or_else(err)?);
+            *offset = u32::from_le_bytes(
+                data.get(off_pos..off_pos + 4)
+                    .and_then(|s| s.try_into().ok())
+                    .ok_or_else(err)?,
+            );
         }
         Ok(PageHeader { num_values, offsets })
     }

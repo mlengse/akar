@@ -579,17 +579,25 @@ mod tests {
 
         #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx") {
+            // SAFETY: the AVX feature was just detected, and the kernels only read
+            // the two initialized slices and return scalars.
             let avx = unsafe { avx::dot_and_sq_norms(&a, &b) };
             assert_triple_close(avx, dot_and_sq_norms_scalar(&a, &b));
+            // SAFETY: covered by the AVX detection above.
             assert_close(unsafe { avx::l2_squared(&a, &b) }, l2_squared_scalar(&a, &b));
+            // SAFETY: covered by the AVX detection above.
             assert_close(unsafe { avx::l1_distance(&a, &b) }, l1_distance_scalar(&a, &b));
         }
 
         #[cfg(target_arch = "x86_64")]
         {
+            // SAFETY: SSE2 is part of the x86_64 baseline, so the kernel is always
+            // callable here; it only reads initialized slices and returns scalars.
             let sse = unsafe { sse2::dot_and_sq_norms(&a, &b) };
             assert_triple_close(sse, dot_and_sq_norms_scalar(&a, &b));
+            // SAFETY: SSE2 is part of the x86_64 baseline.
             assert_close(unsafe { sse2::l2_squared(&a, &b) }, l2_squared_scalar(&a, &b));
+            // SAFETY: SSE2 is part of the x86_64 baseline.
             assert_close(unsafe { sse2::l1_distance(&a, &b) }, l1_distance_scalar(&a, &b));
         }
 

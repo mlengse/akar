@@ -232,17 +232,28 @@ impl FreeSpaceManager {
 
     /// Add pages that are freed but not yet reusable until checkpoint.
     pub fn add_uncheckpointed_free_pages(&self, entry: PageRange) {
-        self.uncheckpointed_free_page_ranges.write().unwrap_or_else(|e| e.into_inner()).push(entry);
+        self.uncheckpointed_free_page_ranges
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(entry);
     }
 
     /// Roll back an incomplete checkpoint — discard uncheckpointed entries.
     pub fn rollback_checkpoint(&self) {
-        self.uncheckpointed_free_page_ranges.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.uncheckpointed_free_page_ranges
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Finalize checkpoint — move uncheckpointed entries into the main free lists.
     pub fn finalize_checkpoint(&self) {
-        let entries = std::mem::take(&mut *self.uncheckpointed_free_page_ranges.write().unwrap_or_else(|e| e.into_inner()));
+        let entries = std::mem::take(
+            &mut *self
+                .uncheckpointed_free_page_ranges
+                .write()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
         for entry in entries {
             self.add_free_pages(entry);
         }
@@ -257,7 +268,14 @@ impl FreeSpaceManager {
     pub fn total_free_pages(&self) -> u64 {
         self.free_lists
             .iter()
-            .map(|list_lock| list_lock.read().unwrap_or_else(|e| e.into_inner()).iter().map(|r| r.num_pages).sum::<u64>())
+            .map(|list_lock| {
+                list_lock
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .map(|r| r.num_pages)
+                    .sum::<u64>()
+            })
             .sum()
     }
 }

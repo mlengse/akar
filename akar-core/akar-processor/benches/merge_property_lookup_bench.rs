@@ -1,11 +1,8 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use akar_parser::ast::{Constant, Expression};
 use ahash::AHashMap;
+use akar_parser::ast::{Constant, Expression};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
-fn lookup_linear<'a>(
-    cols: &'a [String],
-    props: &'a [(String, Expression)],
-) -> Vec<Option<&'a Expression>> {
+fn lookup_linear<'a>(cols: &'a [String], props: &'a [(String, Expression)]) -> Vec<Option<&'a Expression>> {
     let mut res = Vec::with_capacity(cols.len());
     for col in cols {
         if let Some((_, expr)) = props.iter().find(|(n, _)| n == col) {
@@ -17,12 +14,8 @@ fn lookup_linear<'a>(
     res
 }
 
-fn lookup_indexed<'a>(
-    cols: &'a [String],
-    props: &'a [(String, Expression)],
-) -> Vec<Option<&'a Expression>> {
-    let prop_map: AHashMap<&str, &Expression> =
-        props.iter().map(|(k, v)| (k.as_str(), v)).collect();
+fn lookup_indexed<'a>(cols: &'a [String], props: &'a [(String, Expression)]) -> Vec<Option<&'a Expression>> {
+    let prop_map: AHashMap<&str, &Expression> = props.iter().map(|(k, v)| (k.as_str(), v)).collect();
     let mut res = Vec::with_capacity(cols.len());
     for col in cols {
         if let Some(expr) = prop_map.get(col.as_str()) {

@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Incremental HNSW and secondary-index maintenance (feature 024, T003/T005/US4)** · gate `cargo test -p akar-storage --test secondary_index_sync_test` **2 passed / 0 failed** · `cargo test -p akar-processor --test physical_index_scan_test` **3 passed / 0 failed**
+  - `HnswIndex` now carries a tombstone set with `remove`/in-place node update instead of requiring a full rebuild for a delete, so a graph write no longer pays an O(n) vector-index refresh.
+  - `SecondaryIndex::remove_row` / `update_row` / `move_row` prune the old key and drop the entry entirely when its row list empties; the previous behaviour left empty or orphaned keys behind, so a lookup could return a row that no longer held that value.
+  - `PhysicalDelete` and `PhysicalSet` now maintain every declared secondary index on the write path, so a deleted or updated row stops appearing under its former key.
+  - **Known issue (T013, SC-002):** the incremental maintenance did not fix recall quality. Measured 2026-10-30 on the random 384-d `bench_021` corpus: top-10 overlap vs exhaustive is **0.178 / 0.442 / 0.660** at ef=16/64/128 (target ≥0.90), and one 10k build still takes **55.0 s** (target <2 s). ANN therefore stays off in production recall; the gap is not closed.
+
+### Changed
+
+- **Per-column dirty tracking replaces the single persistence flag (feature 024, T004/T034–T038)** · gate `cargo test -p akar-storage --test column_dirty_checkpoint_test` **1 passed / 0 failed**
+  - `NodeTable` keeps a `dirty_columns` set instead of one `persistence_dirty` bit, so a checkpoint rewrites only the columns that actually changed. On a 16-column table with 200 rows, updating one column rewrote that column plus metadata only (<10% of the mirror bytes) and a reload reproduced the exact values.
+  - The append-only batch-insert path still appends incrementally rather than marking every column dirty; there is no bulk-update API to exercise the alternative.
+
 ### Security
 
 - **Akar Safety Hardening & Compliance Gate (feature 022)** · gate `cargo test --manifest-path akar-core/Cargo.toml` **passed / 0 failed** · `python tools/doc-check.py --root akar` PASS

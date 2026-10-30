@@ -430,6 +430,9 @@ mod tests {
         writeln!(creds_file, "OPENAI_API_KEY=\"file_key_123\"").unwrap();
         drop(creds_file);
 
+        // SAFETY: test-only environment mutation. Rust 2024 makes `set_var` unsafe
+        // because another thread could read the environment concurrently; this test
+        // owns the two variables for its duration and restores them before exiting.
         unsafe {
             // 1. Credentials file fallback when no config key
             std::env::set_var("AKAR_CREDENTIALS_FILE", creds_path.to_str().unwrap());
@@ -454,6 +457,8 @@ mod tests {
 
     #[test]
     fn test_openai_api_key_env_var_ignored() {
+        // SAFETY: test-only environment mutation, for the same reason as
+        // `test_resolve_openai_api_key_priority`; the variables are restored below.
         unsafe {
             std::env::set_var("OPENAI_API_KEY", "env_key_should_be_ignored");
             std::env::remove_var("AKAR_CREDENTIALS_FILE");
