@@ -2,9 +2,16 @@
 //!
 //! ```text
 //! cargo run -p akar-vector --release --example bench_021
+//! cargo run -p akar-vector --release --example bench_021 -- threshold=0
 //! ```
+//!
+//! The default run measures the shipped path (exact scan at or below
+//! `EXACT_SEARCH_MAX_NODES`). Passing `threshold=<n>` changes the exact-scan
+//! cutoff: `threshold=0` measures the incremental HNSW path, and
+//! `threshold=<n>` just below the corpus size measures the one-pass relink that
+//! happens when a flat store crosses the threshold.
 
-use akar_vector::hnsw::{DistanceMetric, HnswIndex};
+use akar_vector::hnsw::{DistanceMetric, EXACT_SEARCH_MAX_NODES, HnswIndex};
 use std::time::{Duration, Instant};
 
 const DIM: usize = 384;
@@ -45,14 +52,23 @@ fn overlap(approx: &[(f32, usize)], exact: &[(f32, usize)]) -> f64 {
 
 fn main() {
     let metric = DistanceMetric::Cosine;
+    let threshold = std::env::args()
+        .skip(1)
+        .find_map(|arg| arg.strip_prefix("threshold=").and_then(|value| value.parse().ok()))
+        .unwrap_or(EXACT_SEARCH_MAX_NODES);
     for corpus in [6_000usize, 10_000] {
         let mut rng = Lcg(0x5eed_2021);
-        let mut index = HnswIndex::new(metric);
+        let mut index = HnswIndex::with_exact_threshold(metric, threshold);
         let build = Instant::now();
         for id in 0..corpus {
             index.insert(rng.vector(), id);
         }
         let build = build.elapsed();
+        println!(
+            "SC-001 corpus={corpus} build_ms={:.1} mode={} exact_threshold={threshold}",
+            ms(build),
+            if index.is_graph_built() { "hnsw" } else { "exact" }
+        );
 
         let nodes = index.nodes();
         let queries: Vec<Vec<f32>> = (0..QUERIES).map(|_| rng.vector()).collect();
