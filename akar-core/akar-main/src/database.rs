@@ -469,9 +469,7 @@ impl Database {
     /// Re-reads only the named rows; cost is O(scope) (WP-A1 / T012).
     #[cfg(feature = "vector-extension")]
     pub fn refresh_vector_indexes_for_rows(&self, rows: &[(u64, u64)]) -> akar_storage::table::MaintenanceOutcome {
-        self.storage_manager
-            .table_catalog()
-            .refresh_vector_index_rows(rows)
+        self.storage_manager.table_catalog().refresh_vector_index_rows(rows)
     }
 
     /// No-op when the vector extension is not compiled in.

@@ -53,7 +53,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use wal::WAL;
 
-pub use table::MaintenanceOutcome;
 pub use art_index::ArtPrimaryKeyIndex;
 pub use art_key::ArtKey;
 pub use column_chunk::{ColumnChunk, NODE_GROUP_SIZE};
@@ -67,6 +66,7 @@ pub use persistence::TablePersistence;
 pub use shadow_file::ShadowFile;
 pub use spiller::{MultiWayStreamMerge, SpillFile, Spiller};
 pub use string_dictionary::StringDictionary;
+pub use table::MaintenanceOutcome;
 pub use table::{ColumnDefinition, NodeTable, RelTable, TableCatalog};
 pub use undo_buffer::UndoBuffer;
 pub use vector_index::{VectorIndexTable, extract_f32_list_from_value, extract_f64_list_from_value};

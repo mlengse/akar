@@ -17,6 +17,12 @@
 
 ### Changed
 
+- **Row-scoped vector index maintenance (feature 025, WP-A1 / SC-001 / SC-002 / FR-001--FR-004)** * gates: cargo test -p akar-storage --test vector_index_row_scope_test **5 passed / 0 failed** * cargo bench -p akar-main --bench vector_write_cost **1k: 5.394 ms, 10k: 4.405 ms (ratio 0.817, target <= 2.0x)**
+  - Added MaintenanceOutcome and TableCatalog::refresh_vector_index_rows to reconcile vector indexes only for modified (table_id, row_id) pairs, eliminating full table scans on write statements.
+  - Database::refresh_vector_indexes_for_rows provides the public additive entry point, retaining Database::refresh_vector_indexes as table-wide repair.
+  - In Connection::query and bulk ingest (ulk.rs::insert_nodes), written rows are captured once and dispatched to row-scoped maintenance post-commit, with an observable debug fallback to table-wide rebuild if a write operator reports no row IDs.
+  - Verified by ector_index_row_scope_test (single-row insert examines 1 row, non-indexed writes examine 0 rows, vector update replaces in-place, delete tombstones row).
+
 - **Exact scan below a node threshold; HNSW graph built lazily (feature 024, T064/T013)** · gates on 2026-10-30: `cargo test --workspace` **0 failed** (recorded run), `cargo test -p akar-vector` **50 lib + 3 integration passed**, `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo fmt --all -- --check` clean, `python tools/doc-check.py --root akar` PASS · `cargo run -p akar-vector --release --example bench_021` (same 384-d corpus and harness as the 0.3.3 record)
   - `HnswIndex` is now a flat vector store at or below `EXACT_SEARCH_MAX_NODES` (50,000): `insert` only appends, and `search` / `search_with_ef` / `search_with_filter` score every live vector (tombstones excluded, ties broken by id). The graph is linked once, in insertion order, when the corpus crosses the threshold; `with_exact_threshold(metric, n)` exposes the knob (`n = 0` forces the graph, which the graph-level tests use).
   - **SC-001 PASS on the shipped path:** 10k build **7.7 ms** (was 19.4 s re-measured this session; target <2 s). **SC-002 PASS:** overlap@10 **1.000** at ef 16/64/128 and at the default beam, at both 6k and 10k (was 0.178/0.442/0.660). The trade is query latency: exact scan p95 **2.99 ms @10k** versus 1.892 ms for the old ef=200 graph — about 1 ms for an exact answer.

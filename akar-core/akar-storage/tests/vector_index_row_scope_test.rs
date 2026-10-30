@@ -55,11 +55,7 @@ fn single_row_insert_examines_exactly_one_row() {
             let row = vec![
                 Value::Int64(i as i64),
                 Value::String(format!("text_{i}")),
-                Value::List(vec![
-                    Value::Float(i as f32),
-                    Value::Float(0.5),
-                    Value::Float(0.25),
-                ]),
+                Value::List(vec![Value::Float(i as f32), Value::Float(0.5), Value::Float(0.25)]),
             ];
             table.insert_row(row).unwrap();
         }
@@ -77,11 +73,7 @@ fn single_row_insert_examines_exactly_one_row() {
         let row = vec![
             Value::Int64(1000),
             Value::String("new_memory".into()),
-            Value::List(vec![
-                Value::Float(1000.0),
-                Value::Float(0.5),
-                Value::Float(0.25),
-            ]),
+            Value::List(vec![Value::Float(1000.0), Value::Float(0.5), Value::Float(0.25)]),
         ];
         table.insert_row(row).unwrap()
     };
@@ -134,11 +126,7 @@ fn vector_column_update_replaces_row_without_duplicate() {
             let row = vec![
                 Value::Int64(i as i64),
                 Value::String(format!("text_{i}")),
-                Value::List(vec![
-                    Value::Float(i as f32),
-                    Value::Float(0.5),
-                    Value::Float(0.25),
-                ]),
+                Value::List(vec![Value::Float(i as f32), Value::Float(0.5), Value::Float(0.25)]),
             ];
             table.insert_row(row).unwrap();
         }
@@ -175,15 +163,21 @@ fn delete_case_tombstones_and_excludes_from_search() {
         let mut table = catalog.get_node_table_mut(table_id).unwrap();
         for i in 0..5 {
             let vec_vals = if i == 2 {
-                vec![Value::Float(target_vec[0]), Value::Float(target_vec[1]), Value::Float(target_vec[2])]
+                vec![
+                    Value::Float(target_vec[0]),
+                    Value::Float(target_vec[1]),
+                    Value::Float(target_vec[2]),
+                ]
             } else {
                 vec![Value::Float(i as f32), Value::Float(0.1), Value::Float(0.2)]
             };
-            table.insert_row(vec![
-                Value::Int64(i as i64),
-                Value::String(format!("doc_{i}")),
-                Value::List(vec_vals),
-            ]).unwrap();
+            table
+                .insert_row(vec![
+                    Value::Int64(i as i64),
+                    Value::String(format!("doc_{i}")),
+                    Value::List(vec_vals),
+                ])
+                .unwrap();
         }
     }
     catalog.refresh_vector_index(index_id);
@@ -231,11 +225,7 @@ fn batch_insert_reconciles_all_rows_in_one_pass() {
             let row = vec![
                 Value::Int64(i as i64),
                 Value::String(format!("batch_{i}")),
-                Value::List(vec![
-                    Value::Float(i as f32),
-                    Value::Float(1.0),
-                    Value::Float(2.0),
-                ]),
+                Value::List(vec![Value::Float(i as f32), Value::Float(1.0), Value::Float(2.0)]),
             ];
             let row_id = table.insert_row(row).unwrap();
             row_pairs.push((table_id, row_id));

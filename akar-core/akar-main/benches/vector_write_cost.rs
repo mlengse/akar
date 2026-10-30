@@ -6,11 +6,11 @@
 use akar_common::types::Value;
 use akar_main::connection::Connection;
 use akar_main::database::{Database, SystemConfig};
-use akar_main::{insert_nodes, TypedNode};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use akar_main::{TypedNode, insert_nodes};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 struct MemoryNode {
     id: i64,
@@ -36,10 +36,8 @@ fn setup_indexed_db(size: usize) -> (tempfile::TempDir, Arc<Database>, Connectio
     let db = Arc::new(Database::new(db_path, config).expect("open db"));
     let conn = Connection::new(&db);
 
-    conn.query(
-        "CREATE NODE TABLE Memory (id INT64, embedding FLOAT[3], PRIMARY KEY (id))",
-    )
-    .expect("create Memory table");
+    conn.query("CREATE NODE TABLE Memory (id INT64, embedding FLOAT[3], PRIMARY KEY (id))")
+        .expect("create Memory table");
 
     #[cfg(feature = "vector-extension")]
     db.create_vector_index(
