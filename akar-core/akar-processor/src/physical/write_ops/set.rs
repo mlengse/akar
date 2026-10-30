@@ -4,7 +4,7 @@ use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
 use crate::physical::write_ops::delete::{ast_constant_to_value, row_id_column_index_for};
 use akar_common::arrow_vector::VectorAccess;
 use akar_common::types::Value;
-use akar_common::types::{PhysicalTypeID, physical_type_from_logical};
+use akar_common::types::{PhysicalTypeID, physical_type_from_logical, pk_value_to_string};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_function::registry::FunctionRegistry;
 use akar_function::scalar::evaluate_scalar;
@@ -102,6 +102,25 @@ impl PhysicalOperatorExec for PhysicalSet {
         let mut updated = 0u64;
         if self.is_node {
             if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+                // Secondary indexes declared on this table, captured before the
+                // update loop so entries can be reconciled afterwards (FR-006).
+                let indexed_columns = self.table_catalog.secondary_indexes_for_table(&self.table_name);
+                let old_index_keys: Vec<Vec<(String, usize, Option<String>)>> = rows_to_update
+                    .iter()
+                    .map(|row_idx| {
+                        indexed_columns
+                            .iter()
+                            .filter_map(|(index_name, column)| {
+                                let col_idx = table.columns.iter().position(|c| c.name == *column)?;
+                                let key = table
+                                    .get_value(*row_idx as usize, col_idx)
+                                    .filter(|value| !matches!(**value, Value::Null))
+                                    .map(pk_value_to_string);
+                                Some((index_name.clone(), col_idx, key))
+                            })
+                            .collect()
+                    })
+                    .collect();
                 for (item_idx, item) in self.items.iter().enumerate() {
                     // The binder hardcodes `column_idx: 0` ("resolved by catalog
                     // lookup") but never resolves it — resolve by name at runtime
@@ -130,6 +149,25 @@ impl PhysicalOperatorExec for PhysicalSet {
                                 *row_idx,
                                 col_idx as u32,
                                 &all_values[item_idx][i],
+                            );
+                        }
+                    }
+                }
+                // Reconcile secondary index entries with the post-update values
+                // (FR-006). A row whose indexed column changed must leave its old
+                // key bucket; a NULL write removes it from the index entirely.
+                for (i, row_idx) in rows_to_update.iter().enumerate() {
+                    for (index_name, col_idx, old_key) in &old_index_keys[i] {
+                        let new_key = table
+                            .get_value(*row_idx as usize, *col_idx)
+                            .filter(|value| !matches!(**value, Value::Null))
+                            .map(pk_value_to_string);
+                        if new_key != *old_key {
+                            self.table_catalog.move_secondary_index_row(
+                                index_name,
+                                *row_idx,
+                                old_key.as_deref(),
+                                new_key.as_deref(),
                             );
                         }
                     }

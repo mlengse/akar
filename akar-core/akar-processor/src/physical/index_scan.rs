@@ -45,13 +45,6 @@ impl PhysicalOperatorExec for PhysicalIndexScan {
                 )
             })?;
 
-        if !index.is_available() {
-            // Index not yet available: treat as empty result (FR-004 fallback
-            // would be a full scan, but the planner only routes here when an
-            // index exists; a not-yet-available index yields no matches).
-            return Ok(vec![DataChunk::new(vec![], vec![])]);
-        }
-
         // Get the node table for reading full row data.
         let node_table = self
             .table_catalog
@@ -59,26 +52,67 @@ impl PhysicalOperatorExec for PhysicalIndexScan {
             .ok_or_else(|| format!("Node table '{}' not found for IndexScan", self.table_name))?;
 
         let num_cols = node_table.columns.len();
+        let expected_keys: Vec<String> = self.values.iter().map(pk_value_to_string).collect();
+
+        // A soft-deleted row keeps its slot but its PK is NULL (see
+        // `NodeTable::delete_row_with_txn`), so liveness is a PK check (FR-007).
+        let row_is_live = |row: usize| -> bool {
+            if node_table.primary_key_column >= num_cols {
+                return true;
+            }
+            !node_table
+                .get_value(row, node_table.primary_key_column)
+                .is_none_or(|value| matches!(*value, Value::Null))
+        };
+        // Re-verify the indexed column against the probe values: an index entry
+        // left behind by a missed sync must never surface a non-matching row.
+        let row_matches = |row: usize| -> bool {
+            let Some(col_idx) = node_table
+                .columns
+                .iter()
+                .position(|c| c.name.eq_ignore_ascii_case(&self.column_name))
+            else {
+                return false;
+            };
+            node_table.get_value(row, col_idx).is_some_and(|value| {
+                !matches!(*value, Value::Null) && expected_keys.iter().any(|key| *key == pk_value_to_string(value))
+            })
+        };
 
         // Collect all matching row IDs. The index is on a non-unique column, so
         // one key can match several rows (FR-002).
         let mut row_ids: Vec<u64> = Vec::new();
-        let bm = self.storage_manager.buffer_manager();
-        let mut bm_guard = bm.lock().map_err(|e| format!("buffer manager lock poisoned: {e}"))?;
+        if index.is_available() {
+            let bm = self.storage_manager.buffer_manager();
+            let mut bm_guard = bm.lock().map_err(|e| format!("buffer manager lock poisoned: {e}"))?;
 
-        for value in &self.values {
-            let key = pk_value_to_string(value);
-            let offsets = index
-                .lookup_all(&key, &mut bm_guard)
-                .map_err(|e| format!("index lookup error: {e}"))?;
-            row_ids.extend(offsets);
+            for value in &self.values {
+                let key = pk_value_to_string(value);
+                let offsets = index
+                    .lookup_all(&key, &mut bm_guard)
+                    .map_err(|e| format!("index lookup error: {e}"))?;
+                row_ids.extend(offsets);
+            }
+            row_ids.sort_unstable();
+            row_ids.dedup();
+
+            drop(bm_guard);
+
+            row_ids.retain(|&row_id| {
+                let row = row_id as usize;
+                row < node_table.num_rows as usize && row_is_live(row) && row_matches(row)
+            });
+        } else {
+            // FR-004: a `Building`/`Dropped` index cannot serve lookups. Fall
+            // back to a full table scan so the query stays correct (and identical
+            // to the indexed path) while the index is being built.
+            row_ids = (0..node_table.num_rows)
+                .filter(|&row| row_is_live(row as usize) && row_matches(row as usize))
+                .collect();
         }
-        row_ids.sort_unstable();
-        row_ids.dedup();
-
-        drop(bm_guard);
 
         if row_ids.is_empty() {
+            drop(node_table);
             return Ok(vec![DataChunk::new(vec![], vec![])]);
         }
 

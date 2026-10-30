@@ -727,11 +727,33 @@ impl SecondaryIndex {
     }
 
     /// Remove a row offset from every key it was stored under.
+    ///
+    /// A key that loses its last row is dropped from both the in-memory
+    /// multimap and the durable hash cache: `lookup_all` falls back to the
+    /// durable cache when the multimap has no key, so leaving a stale entry
+    /// there would resurrect the deleted row.
     pub fn remove_row(&mut self, offset: u64) {
-        self.entries.retain(|_, offsets| {
-            offsets.retain(|candidate| *candidate != offset);
-            !offsets.is_empty()
-        });
+        let keys: Vec<String> = self.entries.keys().cloned().collect();
+        for key in keys {
+            if let Some(offsets) = self.entries.get_mut(&key) {
+                offsets.retain(|candidate| *candidate != offset);
+            }
+            if self.entries.get(&key).is_none_or(|offsets| offsets.is_empty()) {
+                self.entries.remove(&key);
+                self.index.delete(&key);
+            }
+        }
+        // The durable hash cache also keeps entries the multimap never had
+        // (e.g. a key pruned by an earlier operation). Drop orphans here.
+        let orphaned: Vec<String> = self
+            .index
+            .iter()
+            .filter(|(key, value)| **value == offset && !self.entries.contains_key(key.as_str()))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in orphaned {
+            self.index.delete(&key);
+        }
     }
 
     /// Update a row offset from an old key to a new key.
@@ -739,8 +761,42 @@ impl SecondaryIndex {
         if let Some(offsets) = self.entries.get_mut(old_key) {
             offsets.retain(|&cand| cand != offset);
         }
-        self.entries.retain(|_, offsets| !offsets.is_empty());
+        if self.entries.get(old_key).is_none_or(|offsets| offsets.is_empty()) {
+            self.entries.remove(old_key);
+            self.index.delete(&old_key.to_string());
+        } else if self.index.lookup_cached(&old_key.to_string()) == Some(offset)
+            && let Some(next) = self.entries.get(old_key).and_then(|offsets| offsets.first()).copied()
+        {
+            self.index.insert(old_key.to_string(), next);
+        }
         self.insert(new_key, offset);
+    }
+
+    /// Move a row offset between keys in one step.
+    ///
+    /// Handles every case a `DELETE` or `SET` produces: the old key may be
+    /// absent (insert path), the new key may be absent (delete path), both may
+    /// be present (update path), and a `NULL` column value simply contributes
+    /// no key on that side. The row is never left registered under its old key
+    /// — including in the durable hash cache used as a lookup fallback.
+    pub fn move_row(&mut self, old_key: Option<&str>, new_key: Option<&str>, offset: u64) {
+        if let Some(old) = old_key {
+            if let Some(offsets) = self.entries.get_mut(old) {
+                offsets.retain(|&cand| cand != offset);
+            }
+            if self.entries.get(old).is_none_or(|offsets| offsets.is_empty()) {
+                self.entries.remove(old);
+                self.index.delete(&old.to_string());
+            }
+            // A key that only ever lived in the durable cache (no multimap
+            // counterpart) must not keep pointing at the moved row.
+            if !self.entries.contains_key(old) && self.index.lookup_cached(&old.to_string()) == Some(offset) {
+                self.index.delete(&old.to_string());
+            }
+        }
+        if let Some(new) = new_key {
+            self.insert(new.to_string(), offset);
+        }
     }
 }
 

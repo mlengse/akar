@@ -1,6 +1,6 @@
 //! Auto-extracted from physical_operator.rs
 use crate::physical::types::{OperatorResult, PhysicalOperatorExec};
-use akar_common::types::{PhysicalTypeID, Value};
+use akar_common::types::{PhysicalTypeID, Value, pk_value_to_string};
 use akar_common::vector::{DataChunk, ValueVector};
 use akar_parser::ast::Constant;
 use akar_storage::table::TableCatalog;
@@ -114,6 +114,9 @@ impl PhysicalOperatorExec for PhysicalDelete {
                 }
             }
             if let Some(mut table) = self.table_catalog.get_node_table_by_name_mut(&self.table_name) {
+                // Secondary indexes declared on this table, captured once so the
+                // hot loop does not re-scan the index catalog (FR-005).
+                let indexed_columns = self.table_catalog.secondary_indexes_for_table(&self.table_name);
                 for &row_idx in &rows_to_delete {
                     // Capture pre-delete row data for rollback (P52.18) and
                     // record the delete in VersionInfo for MVCC isolation.
@@ -123,8 +126,25 @@ impl PhysicalOperatorExec for PhysicalDelete {
                         let old_data = table.row_undo_bytes(row_idx);
                         u.push(UndoRecord::delete(self.table_id, row_idx, old_data));
                     }
+                    // Read the indexed values before the row is nulled so the
+                    // index entry can be located and dropped (FR-005).
+                    let old_index_keys: Vec<(String, Option<String>)> = indexed_columns
+                        .iter()
+                        .filter_map(|(index_name, column)| {
+                            let col_idx = table.columns.iter().position(|c| c.name == *column)?;
+                            let key = table
+                                .get_value(row_idx as usize, col_idx)
+                                .filter(|value| !matches!(**value, Value::Null))
+                                .map(pk_value_to_string);
+                            Some((index_name.clone(), key))
+                        })
+                        .collect();
                     if table.delete_row_with_txn(row_idx, self.txn_id).is_ok() {
                         deleted += 1;
+                        for (index_name, old_key) in &old_index_keys {
+                            self.table_catalog
+                                .move_secondary_index_row(index_name, row_idx, old_key.as_deref(), None);
+                        }
                         log_delete_record(&self.wal_sink, self.table_id, row_idx);
                     }
                 }

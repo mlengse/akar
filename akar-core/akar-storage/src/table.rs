@@ -1807,6 +1807,43 @@ impl TableCatalog {
         }
     }
 
+    /// Remove a soft-deleted row from every secondary index declared on
+    /// `table_name` (FR-005).
+    ///
+    /// Called by the write path after `NodeTable::delete_row_with_txn` nulls the
+    /// row: without this, a stale offset keeps resolving through the index until
+    /// the next full rebuild. Safe to call while a mutable node-table guard is
+    /// held, because it only touches the secondary-index map (a separate shard
+    /// set in the same `DashMap` container).
+    pub fn remove_secondary_index_row(&self, table_name: &str, row_id: u64) {
+        for (index_name, _) in self.secondary_indexes_for_table(table_name) {
+            if let Some(mut index) = self.get_secondary_index_mut(&index_name) {
+                index.remove_row(row_id);
+            }
+        }
+    }
+
+    /// Move a row offset between keys in one secondary index.
+    ///
+    /// `old_key`/`new_key` are the string forms of the indexed column value
+    /// before and after the write; `None` means the value is `NULL` (or the
+    /// column was not indexed). Used by `SET` to keep secondary indexes current
+    /// without a full rebuild (FR-006).
+    pub fn move_secondary_index_row(
+        &self,
+        index_name: &str,
+        row_id: u64,
+        old_key: Option<&str>,
+        new_key: Option<&str>,
+    ) {
+        if old_key == new_key {
+            return;
+        }
+        if let Some(mut index) = self.get_secondary_index_mut(index_name) {
+            index.move_row(old_key, new_key, row_id);
+        }
+    }
+
     /// Rebuild a vector index from the current contents of its node table.
     ///
     /// The HNSW graph is re-populated with the live row ids and vectors, so

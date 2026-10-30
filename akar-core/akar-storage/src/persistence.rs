@@ -175,6 +175,20 @@ impl TablePersistence {
         }
     }
 
+    /// Remove the durable mirror file for a single column (FR-008).
+    ///
+    /// Used by the column-granular checkpoint path: the dirty column is dropped
+    /// and rebuilt in place while every other column mirror is left untouched.
+    fn drop_column_mirror(table_id: u64, col_idx: usize, db_path: &Path, bm: &Arc<Mutex<BufferManager>>) {
+        {
+            let mut guard = bm.lock().unwrap_or_else(|e| e.into_inner());
+            guard.drop_file(&format!("col_{table_id}_{col_idx}"));
+        }
+        let path = db_path.join(format!("col_{table_id}_{col_idx}"));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("meta"));
+    }
+
     /// Remove the mirror files for columns `0..num_cols` of `table_id`.
     ///
     /// Drops the buffer-manager state (frames/mmap/registration) first so the
@@ -212,13 +226,16 @@ impl TablePersistence {
         let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let entry = state.entry(table.table_id).or_default();
 
-        if !table.persistence_dirty && table.num_rows == entry.flushed_rows {
+        if !table.persistence_dirty && table.dirty_columns.is_empty() && table.num_rows == entry.flushed_rows {
             return Ok(());
         }
 
-        if table.persistence_dirty || table.num_rows < entry.flushed_rows {
-            // Full rewrite: an UPDATE/DELETE touched the table, so rebuild the
-            // mirror from scratch (the in-memory state is the source of truth).
+        // A shrinking row count or a widened schema invalidates every column
+        // mirror. Otherwise an UPDATE only dirties the columns it touched, and
+        // those are rebuilt on their own (FR-008).
+        let schema_changed = entry.columns.len() != num_cols;
+        if table.num_rows < entry.flushed_rows || schema_changed {
+            // Full rewrite: the in-memory state is the source of truth.
             Self::drop_mirror_files(table.table_id, num_cols, db_path, bm);
             let mut columns = Vec::with_capacity(num_cols);
             let mut oversized: Vec<HashMap<u64, Vec<u8>>> = (0..num_cols).map(|_| HashMap::new()).collect();
@@ -235,6 +252,55 @@ impl TablePersistence {
             entry.columns = columns;
             entry.oversized = oversized;
             entry.flushed_rows = table.num_rows;
+            table.dirty_columns.clear();
+            table.persistence_dirty = false;
+        } else if !table.dirty_columns.is_empty() {
+            // Column-granular checkpoint (FR-008): append any new rows to every
+            // mirror so all columns stay row-aligned, then rebuild only the
+            // mirror files for the columns whose values changed. A single-field
+            // update on a wide table therefore rewrites one column, not the
+            // whole table.
+            if entry.columns.is_empty() {
+                for (ci, def) in table.columns.iter().enumerate() {
+                    entry.columns.push(Self::build_column(
+                        def,
+                        table.table_id,
+                        ci as u32,
+                        db_path,
+                        bm,
+                        page_size,
+                    ));
+                }
+                entry.oversized = (0..num_cols).map(|_| HashMap::new()).collect();
+            }
+            for row in entry.flushed_rows as usize..table.num_rows as usize {
+                for (ci, col) in entry.columns.iter_mut().enumerate() {
+                    let value = table.get_value(row, ci).cloned().unwrap_or(Value::Null);
+                    Self::append_mirror_value(col, &mut entry.oversized[ci], row as u64, &value)?;
+                }
+            }
+            let mut dirty: Vec<usize> = table.dirty_columns.iter().copied().filter(|ci| *ci < num_cols).collect();
+            dirty.sort_unstable();
+            for ci in dirty {
+                Self::drop_column_mirror(table.table_id, ci, db_path, bm);
+                let mut column =
+                    Self::build_column(&table.columns[ci], table.table_id, ci as u32, db_path, bm, page_size);
+                let mut oversized = HashMap::new();
+                for row in 0..table.num_rows as usize {
+                    let value = table.get_value(row, ci).cloned().unwrap_or(Value::Null);
+                    Self::append_mirror_value(&mut column, &mut oversized, row as u64, &value)?;
+                }
+                column.flush().map_err(Self::io_err)?;
+                column.save_metadata().map_err(Self::io_err)?;
+                entry.columns[ci] = column;
+                entry.oversized[ci] = oversized;
+            }
+            for column in entry.columns.iter_mut() {
+                column.flush().map_err(Self::io_err)?;
+                column.save_metadata().map_err(Self::io_err)?;
+            }
+            entry.flushed_rows = table.num_rows;
+            table.dirty_columns.clear();
             table.persistence_dirty = false;
         } else {
             // Incremental append of newly inserted rows.
