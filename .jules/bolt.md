@@ -135,3 +135,7 @@
 ## 2026-10-29 - Direct result vector allocation and stack pre-allocation in Kosaraju SCC
 **Learning:** In Kosaraju's strongly connected components algorithm (`compute_scc_kosaraju`), initializing component results as `Vec<usize>` required a secondary heap allocation and an $O(N)$ post-processing element conversion pass (`component.iter().map(|&c| c as f64).collect()`). Initializing `component` directly as `Vec<f64>` (`vec![0.0f64; n]`) and assigning `component[cur] = comp_id as f64` eliminates secondary heap allocation and post-processing loop completely. Furthermore, pre-allocating DFS traversal stacks (`dfs_stack` and `dfs_stack2`) with capacity `n` (`Vec::with_capacity(n)`) eliminates dynamic re-allocation churn during graph sweeps.
 **Action:** Pre-allocate output vectors in target type (`Vec<f64>`) directly in graph algorithms to avoid secondary heap vector conversions, and pre-allocate DFS stack capacities to avoid reallocations.
+
+## MERGE Primary Key Lookup Optimization
+- **Problem**: In `PhysicalMerge::execute`, finding the primary key column expression iterated over all table columns and looked up property names in `prop_map` or linearly searched `self.properties`.
+- **Solution**: Indexed `table_info.primary_key_column` directly and fetched the expression from `prop_map` in O(1) time without looping over columns.

@@ -111,13 +111,12 @@ impl PhysicalOperatorExec for PhysicalMerge {
 
                 // Determine PK property
                 let mut pk_val = None;
-                for col_idx in 0..num_cols {
-                    let col = &table_info.columns[col_idx];
-                    if col.is_primary_key {
-                        if let Some(expr) = prop_map.get(col.name.as_str()) {
-                            let val = eval_const(expr, Some(chunk), row);
-                            pk_val = Some(val);
-                        }
+                let pk_col = table_info.primary_key_column;
+                if pk_col < num_cols {
+                    let col_name = &table_info.columns[pk_col].name;
+                    if let Some(expr) = prop_map.get(col_name.as_str()) {
+                        let val = eval_const(expr, Some(chunk), row);
+                        pk_val = Some(val);
                     }
                 }
 
