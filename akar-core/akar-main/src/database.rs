@@ -155,11 +155,6 @@ pub struct Database {
     /// task-dispatch path that reads it is not wired up yet.
     #[allow(dead_code)]
     pub(crate) task_system: Arc<TaskSystem>,
-    /// Instance memory manager. Cloned into `storage_manager` and
-    /// `memory_governor` at construction; retained so the database owns a
-    /// handle to the instance budget.
-    #[allow(dead_code)]
-    pub(crate) memory_manager: Arc<MemoryManager>,
     /// Per-query memory governor: grants each query a bounded slice of the
     /// instance budget, gates admission under pressure, and can reclaim
     /// (P110.2/P110.3).
@@ -759,7 +754,6 @@ impl Database {
             transaction_manager,
             function_registry,
             task_system,
-            memory_manager,
             memory_governor,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
             stats_store,
