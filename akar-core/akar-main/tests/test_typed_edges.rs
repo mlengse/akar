@@ -160,21 +160,34 @@ fn merge_on_existing_pk_updates_without_a_duplicate_error() {
 /// FR-015 / SC-006: concurrent merges for the same key leave exactly one node.
 #[test]
 fn concurrent_merges_leave_one_node() {
-    let (db, conn) = setup();
+    let (db, _dir) = setup_db();
+    let conn = Connection::new(&db);
+    conn.query("CREATE NODE TABLE Memory (id INT64, content STRING, PRIMARY KEY (id))")
+        .unwrap();
+
     let handles: Vec<_> = (0..8)
         .map(|worker| {
             let database = std::sync::Arc::clone(&db);
             std::thread::spawn(move || {
                 let connection = Connection::new(&database);
-                connection
-                    .query(&format!("MERGE (m:Memory {{id: 99}}) SET m.content = 'w{worker}'"))
-                    .map(|result| result.is_success())
-                    .unwrap_or(false)
+                let query_str = format!("MERGE (m:Memory {{id: 99}}) SET m.content = 'w{worker}'");
+                let mut retries = 0;
+                loop {
+                    match connection.query(&query_str) {
+                        Ok(res) if res.is_success() => return true,
+                        Ok(_) => return false,
+                        Err(e) if e.contains("write conflict") && retries < 20 => {
+                            retries += 1;
+                            std::thread::sleep(std::time::Duration::from_millis(5 * retries));
+                        }
+                        Err(_) => return false,
+                    }
+                }
             })
         })
         .collect();
     for handle in handles {
-        handle.join().unwrap();
+        assert!(handle.join().unwrap(), "worker failed to merge");
     }
 
     let rows = query_rows(&conn, "MATCH (m:Memory {id: 99}) RETURN m.id");

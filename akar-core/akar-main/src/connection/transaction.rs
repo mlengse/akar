@@ -167,10 +167,21 @@ impl Connection {
         let tm = &self.database.transaction_manager;
         let records = tm.rollback(txn);
 
-        // Rollback in StorageManager too (if we have resources)
+        // Rollback in StorageManager too
+        let sm = &self.database.storage_manager;
         if let Some(mut res) = resources {
-            let sm = &self.database.storage_manager;
             sm.rollback_transaction(&mut res.local_storage, &mut res.shadow_file, txn_id, &records.to_vec())
+                .map_err(|e| {
+                    tracing::error!("Storage rollback failed for txn#{}: {e}", txn_id);
+                    format!("Storage rollback failed: {e}")
+                })?;
+        } else {
+            // Even if resources were already extracted from the map (e.g. during commit_write_txn before
+            // prepare_commit failed with OCC write conflict), undo records MUST still be rolled back in
+            // StorageManager so table mutations are not left un-reverted!
+            let mut dummy_ls = LocalStorage::new();
+            let mut dummy_sf = ShadowFile::new();
+            sm.rollback_transaction(&mut dummy_ls, &mut dummy_sf, txn_id, &records.to_vec())
                 .map_err(|e| {
                     tracing::error!("Storage rollback failed for txn#{}: {e}", txn_id);
                     format!("Storage rollback failed: {e}")

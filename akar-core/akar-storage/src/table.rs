@@ -587,6 +587,21 @@ impl NodeTable {
         self.delete_row_with_txn(row_idx, None)
     }
 
+    /// Restore MVCC visibility for a row whose deletion was rolled back.
+    pub fn restore_deleted_row_mvcc(&mut self, row_idx: u64) {
+        let mut offset = 0u64;
+        for group in &mut self.node_groups {
+            if row_idx < offset + group.num_nodes {
+                let local_row = (row_idx - offset) as u32;
+                if let Some(ref vi) = group.version_info {
+                    vi.remove_delete(local_row);
+                }
+                break;
+            }
+            offset += group.num_nodes;
+        }
+    }
+
     /// Delete a row with optional MVCC tracking.
     ///
     /// When `txn_id` is `Some(...)`, the delete is recorded in VersionInfo
@@ -612,6 +627,11 @@ impl NodeTable {
                     if let Some(ref vi) = group.version_info {
                         vi.delete(txn, local_row as u32);
                     }
+                } else if let Some(ref vi) = group.version_info {
+                    // When deleting without a txn_id (e.g. unversioned delete or insert rollback),
+                    // clear any insert record for this row so an aborted transaction ID does not
+                    // permanently mask the row from MVCC visibility.
+                    vi.remove_insert(local_row as u32);
                 }
                 // Capture the PK value before it is nulled so the in-memory
                 // PK indexes can be kept in sync (P52.16).

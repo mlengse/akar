@@ -1024,6 +1024,7 @@ impl StorageManager {
                         for (col_idx, val) in values.into_iter().enumerate() {
                             let _ = table.update_cell(record.row_id, col_idx, val);
                         }
+                        table.restore_deleted_row_mvcc(record.row_id);
                     }
                 }
             } else if let Some(mut rel) = self.table_catalog.get_rel_table_mut(record.table_id) {

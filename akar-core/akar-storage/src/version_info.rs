@@ -59,6 +59,20 @@ impl VectorVersionInfo {
         }
     }
 
+    /// Remove insert tracking for a row (e.g. when an insert is rolled back).
+    pub fn remove_insert(&self, row_in_vector: u32) {
+        if let Ok(mut ins) = self.inserted.lock() {
+            ins.remove(&row_in_vector);
+        }
+    }
+
+    /// Remove delete tracking for a row (e.g. when a delete is rolled back).
+    pub fn remove_delete(&self, row_in_vector: u32) {
+        if let Ok(mut del) = self.deleted.lock() {
+            del.remove(&row_in_vector);
+        }
+    }
+
     /// Drop all recorded inserts and deletes for this vector.
     ///
     /// Called when the owning node group's in-memory buffer is cleared for
@@ -187,6 +201,22 @@ impl VersionInfo {
         let v_idx = self.vector_idx(row);
         if v_idx < self.vectors.len() {
             self.vectors[v_idx].delete(txn_id, self.row_in_vector(row));
+        }
+    }
+
+    /// Remove insert tracking for a row across vectors.
+    pub fn remove_insert(&self, row: u32) {
+        let v_idx = self.vector_idx(row);
+        if v_idx < self.vectors.len() {
+            self.vectors[v_idx].remove_insert(self.row_in_vector(row));
+        }
+    }
+
+    /// Remove delete tracking for a row across vectors.
+    pub fn remove_delete(&self, row: u32) {
+        let v_idx = self.vector_idx(row);
+        if v_idx < self.vectors.len() {
+            self.vectors[v_idx].remove_delete(self.row_in_vector(row));
         }
     }
 
