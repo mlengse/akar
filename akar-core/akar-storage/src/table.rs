@@ -52,8 +52,9 @@ pub struct NodeTable {
     /// Optional ART (Adaptive Radix Tree) index for PK range scans.
     /// When present, `insert_row()` also updates this index automatically.
     pub art_index: Option<ArtPrimaryKeyIndex>,
-    /// Set of column indices modified by an UPDATE/DELETE. The durable column mirror
-    /// (see `persistence.rs`) flushes only the named dirty columns rather than performing a full rewrite.
+    /// Set of column indices dirtied by a write (UPDATE/DELETE). The persistence mirror
+    /// (see `persistence.rs`) flushes only the named dirty columns, preserving clean
+    /// columns on disk without rewriting untouched column files (FR-014).
     pub dirty_columns: HashSet<usize>,
     pub persistence_dirty: bool,
     /// Optional spiller for memory-bounded bulk ingest. When set, newly
