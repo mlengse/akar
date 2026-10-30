@@ -99,6 +99,9 @@ impl PhysicalOperatorExec for PhysicalMerge {
         let mut matched_src: Vec<(usize, usize)> = Vec::new();
         let mut created_src: Vec<(usize, usize)> = Vec::new();
 
+        let prop_map: ahash::AHashMap<&str, &akar_parser::ast::Expression> =
+            self.properties.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
         for (ci, chunk) in chunks.iter().enumerate() {
             for row in 0..chunk.size {
                 let table_info = self
@@ -111,7 +114,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
                 for col_idx in 0..num_cols {
                     let col = &table_info.columns[col_idx];
                     if col.is_primary_key {
-                        if let Some((_, expr)) = self.properties.iter().find(|(n, _)| n == &col.name) {
+                        if let Some(expr) = prop_map.get(col.name.as_str()) {
                             let val = eval_const(expr, Some(chunk), row);
                             pk_val = Some(val);
                         }
@@ -159,7 +162,7 @@ impl PhysicalOperatorExec for PhysicalMerge {
                         let mut new_values: Vec<Value> = Vec::new();
                         for col_idx in 0..num_cols {
                             let col_name = &table_info.columns[col_idx].name;
-                            if let Some((_, expr)) = self.properties.iter().find(|(n, _)| n == col_name) {
+                            if let Some(expr) = prop_map.get(col_name.as_str()) {
                                 new_values.push(eval_const(expr, Some(chunk), row));
                             } else if table_info.columns[col_idx].is_primary_key {
                                 return Err(format!("MERGE CREATE requires primary key '{}'", col_name).into());

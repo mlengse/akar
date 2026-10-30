@@ -67,3 +67,7 @@ workspace = true
 [[bench]]
 name = "optional_extend_bench"
 harness = false
+
+[[bench]]
+name = "merge_property_lookup_bench"
+harness = false
