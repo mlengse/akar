@@ -4,7 +4,6 @@ use akar_catalog::Catalog;
 use akar_common::file_system::VirtualFileSystemRegistry;
 use akar_common::memory::MemoryManager;
 use akar_common::query_pool::{Admission, GovernorPolicy, MemoryGovernor, QueryMemoryPool};
-use akar_common::task_system::TaskSystem;
 use akar_extension::{ExtensionContext, ExtensionRegistry};
 use akar_function::FunctionRegistry;
 use akar_storage::StorageManager;
@@ -151,10 +150,6 @@ pub struct Database {
     pub(crate) catalog: Arc<Mutex<Catalog>>,
     pub(crate) transaction_manager: Arc<TransactionManager>,
     pub(crate) function_registry: Arc<Mutex<FunctionRegistry>>,
-    /// Worker pool for the task system. Held for the database's lifetime; the
-    /// task-dispatch path that reads it is not wired up yet.
-    #[allow(dead_code)]
-    pub(crate) task_system: Arc<TaskSystem>,
     /// Per-query memory governor: grants each query a bounded slice of the
     /// instance budget, gates admission under pressure, and can reclaim
     /// (P110.2/P110.3).
@@ -734,7 +729,6 @@ impl Database {
         };
 
         let memory_manager = Arc::new(MemoryManager::new(config.max_db_size));
-        let task_system = Arc::new(TaskSystem::new(config.max_num_threads as usize));
 
         // Load a previously-persisted catalog (if any). Fresh databases and
         // databases created before catalog persistence start with an empty
@@ -767,7 +761,6 @@ impl Database {
             catalog,
             transaction_manager,
             function_registry,
-            task_system,
             memory_governor,
             extension_registry: Mutex::new(ExtensionRegistry::new()),
             stats_store,
