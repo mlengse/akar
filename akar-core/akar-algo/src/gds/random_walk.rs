@@ -16,8 +16,12 @@ pub fn compute_random_walk(
     let mut hit_counts = vec![0.0; n];
     let mut rng = SimpleRng::new(42);
 
-    // Bolt Optimization: Avoid allocating `start_nodes: Vec<usize>` when `start_node` is `None`
-    // and use direct CSR offset indexing in the step loop to eliminate slice bounds check overhead.
+    // Bolt Optimization: Avoid allocating `start_nodes: Vec<usize>` when `start_node` is `None`,
+    // hoist slice references to `offsets` and `adjacency` outside walk loops, and index slices directly
+    // to eliminate struct dereference overhead on hot random walk steps.
+    let offsets = &csr.offsets;
+    let adjacency = &csr.adjacency;
+
     let run_walks = |start: usize, hit_counts: &mut [f64], rng: &mut SimpleRng| {
         if start >= n {
             return;
@@ -28,15 +32,15 @@ pub fn compute_random_walk(
             hit_counts[current] += 1.0;
 
             for _ in 0..steps {
-                let start_off = csr.offsets[current];
-                let end_off = csr.offsets[current + 1];
+                let start_off = offsets[current];
+                let end_off = offsets[current + 1];
                 let deg = end_off - start_off;
                 if deg == 0 {
                     break;
                 }
 
                 let idx = rng.gen_range(deg);
-                current = csr.adjacency[start_off + idx].1.offset as usize;
+                current = adjacency[start_off + idx].1.offset as usize;
 
                 if current < n {
                     hit_counts[current] += 1.0;
