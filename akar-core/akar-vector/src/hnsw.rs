@@ -52,6 +52,13 @@ const EF_CONSTRUCTION: usize = 128;
 /// Number of iterations for the multi-element pruning procedure.
 const MAX_M: usize = M_MAX;
 
+/// Relative slack factor for the diversity heuristic on high-dimensional
+/// vectors where distances concentrate tightly (T052). Allows near-equidistant
+/// same-cone neighbours to be retained instead of being backfilled with far
+/// orthogonal neighbours, improving top-k overlap without sacrificing
+/// angular diversity entirely.
+const DIVERSITY_ALPHA: f32 = 1.02;
+
 /// Size of the dynamic candidate list during search.
 const EF_SEARCH: usize = 200;
 
@@ -497,7 +504,7 @@ impl HnswIndex {
             };
             let closer_to_query_than_selected = selected.iter().all(|&sel_id| {
                 self.get_node_vec(sel_id, pending)
-                    .is_none_or(|sel_vec| cand_dist < self.metric.compute(cand_vec, sel_vec))
+                    .is_none_or(|sel_vec| cand_dist < DIVERSITY_ALPHA * self.metric.compute(cand_vec, sel_vec))
             });
             if closer_to_query_than_selected {
                 selected.push(cand_id);
@@ -566,11 +573,7 @@ impl HnswIndex {
     /// after a tombstone), the old node is still present while neighbours are
     /// searched, and the final insert replaces it with the freshly linked node.
     fn insert_graph_node(&mut self, id: usize, vector: Vec<f32>) {
-        let new_level = if self.nodes.is_empty() {
-            MAX_M // First node goes to max level
-        } else {
-            self.random_level()
-        };
+        let new_level = self.random_level();
 
         // Build connection storage for all levels this node will occupy
         let mut connections = vec![Vec::new(); new_level + 1];
