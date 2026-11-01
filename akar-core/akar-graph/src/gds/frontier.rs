@@ -152,17 +152,13 @@ impl Frontier for SparseFrontierReference {
 /// Each node offset maps directly to an array slot.
 pub struct DenseFrontier {
     data: Vec<AtomicU16>,
-    /// Reserved for multi-label pinning. `Frontier::pin_table_id` is a no-op in
-    /// this simplified port, so the flag is set but not yet read.
-    #[allow(dead_code)]
-    pinned: bool,
 }
 
 impl DenseFrontier {
     /// Create a new dense frontier with `size` entries, initialized to `val`.
     pub fn new(size: usize, val: Iteration) -> Self {
         let data = (0..size).map(|_| AtomicU16::new(val)).collect();
-        Self { data, pinned: false }
+        Self { data }
     }
 
     /// Create from an existing graph's max node count.
