@@ -10,17 +10,13 @@ use std::io::Read;
 
 /// Result of scanning a Unity Catalog table.
 ///
-/// `columns` is scan-result scaffolding for the future
-/// data-scan path (currently the REST client only returns metadata); only
-/// `table_name`/`table_type`/`schema`/`storage_location` are read today.
+/// Holds metadata fields `table_name`, `table_type`, `schema`, and `storage_location`.
 /// Compiled only under the `native` feature (`--all-features`).
 pub struct UcTableScan {
     pub table_name: String,
     pub table_type: String,
     pub schema: String,
     pub storage_location: Option<String>,
-    #[allow(dead_code)]
-    pub columns: Vec<UcColumnInfo>,
 }
 
 pub struct UcColumnInfo {
@@ -84,7 +80,6 @@ pub fn get_table_info(endpoint: &str, token: &str, table: &str) -> Result<UcTabl
         table_type,
         schema,
         storage_location,
-        columns,
     })
 }
 
@@ -128,7 +123,6 @@ mod tests {
             table_type: "TABLE".into(),
             schema: String::new(),
             storage_location: None,
-            columns: Vec::new(),
         };
     }
 }
