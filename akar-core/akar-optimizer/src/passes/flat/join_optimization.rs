@@ -245,4 +245,114 @@ mod tests {
         );
         assert_eq!(extract_root_variable(&bin), None);
     }
+
+    fn make_scan(name: &str) -> LogicalOperator {
+        LogicalOperator::ScanNode(LogicalScanNode {
+            predicate: None,
+            table_name: name.into(),
+            table_id: 0,
+            alias: Some(name.into()),
+            columns: vec!["id".into()],
+            cardinality: 100,
+            fts_query: None,
+        })
+    }
+
+    fn make_equi_join_filter(left_var: &str, right_var: &str) -> LogicalOperator {
+        LogicalOperator::Filter(LogicalFilter {
+            expression: Expression::BinaryOp(
+                BinaryOp::Equal,
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable(left_var.into())),
+                    "id".into(),
+                )),
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable(right_var.into())),
+                    "id".into(),
+                )),
+            ),
+            children: Vec::new(),
+            cardinality: 0,
+        })
+    }
+
+    fn make_non_equi_filter(var: &str, val: i64) -> LogicalOperator {
+        LogicalOperator::Filter(LogicalFilter {
+            expression: Expression::BinaryOp(
+                BinaryOp::GreaterThan,
+                Box::new(Expression::PropertyAccess(
+                    Box::new(Expression::Variable(var.into())),
+                    "age".into(),
+                )),
+                Box::new(Expression::Constant(Constant::Integer(val))),
+            ),
+            children: Vec::new(),
+            cardinality: 0,
+        })
+    }
+
+    #[test]
+    fn test_join_optimization_preserves_equi_join_filter_single_scan() {
+        // In a single-scan pipeline without joins, `a.id = b.id` must be preserved.
+        let plan = vec![make_scan("a"), make_equi_join_filter("a", "b")];
+        let pass = JoinOptimization;
+        let result = pass.apply(&plan);
+
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], LogicalOperator::ScanNode(_)));
+        assert!(matches!(result[1], LogicalOperator::Filter(_)));
+    }
+
+    #[test]
+    fn test_join_optimization_preserves_equi_join_filter_in_intersect_plan() {
+        // In a plan without HashJoin/CrossProduct (e.g. WCOJ/Intersect),
+        // equi-join filters must be kept.
+        let intersect_op = LogicalOperator::Intersect(LogicalIntersect {
+            num_build_sides: 1,
+            build_key_exprs: vec![],
+            left: Box::new(make_scan("a")),
+            right: Box::new(make_scan("b")),
+            cardinality: 0,
+        });
+        let plan = vec![intersect_op, make_equi_join_filter("a", "b")];
+        let pass = JoinOptimization;
+        let result = pass.apply(&plan);
+
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], LogicalOperator::Intersect(_)));
+        assert!(matches!(result[1], LogicalOperator::Filter(_)));
+    }
+
+    #[test]
+    fn test_join_optimization_fallback_removes_equi_join_filter_with_join() {
+        // When a join (e.g. CrossProduct) is present and reorder_joins_dp_bushy
+        // returns None (e.g. non-scan leaves), the fallback path drops
+        // equi-join filters but keeps non-equi filters.
+        let cp = LogicalOperator::CrossProduct(LogicalCrossProduct {
+            left: Box::new(LogicalOperator::ExpressionsScan(LogicalExpressionsScan {
+                expressions: vec!["a".into()],
+                outer_accumulate_idx: None,
+                cardinality: 10,
+            })),
+            right: Box::new(LogicalOperator::ExpressionsScan(LogicalExpressionsScan {
+                expressions: vec!["b".into()],
+                outer_accumulate_idx: None,
+                cardinality: 10,
+            })),
+            cardinality: 100,
+        });
+        let equi_filter = make_equi_join_filter("a", "b");
+        let non_equi_filter = make_non_equi_filter("a", 25);
+
+        let plan = vec![cp, equi_filter, non_equi_filter];
+        let pass = JoinOptimization;
+        let result = pass.apply(&plan);
+
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], LogicalOperator::CrossProduct(_)));
+        assert!(matches!(result[1], LogicalOperator::Filter(_)));
+        if let LogicalOperator::Filter(ref f) = result[1] {
+            assert!(!is_join_condition(&f.expression));
+        }
+    }
 }
