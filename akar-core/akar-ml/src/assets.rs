@@ -74,6 +74,81 @@ mod tests {
     #[test]
     fn missing_model_is_none() {
         assert!(bundled_model_dir("definitely-not-a-bundled-model").is_none());
+        assert!(bundled_model("definitely-not-a-bundled-model").is_none());
+    }
+
+    #[test]
+    fn test_is_complete_bundle_scenarios() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = temp_dir.path();
+
+        // 1. Empty directory is not a complete bundle
+        assert!(!is_complete_bundle(path));
+
+        // 2. Partial files (only model.onnx)
+        std::fs::write(path.join("model.onnx"), b"onnx").expect("failed to write model.onnx");
+        assert!(!is_complete_bundle(path));
+
+        // Add subset of other files, but not all
+        std::fs::write(path.join("tokenizer.json"), b"{}").expect("failed to write tokenizer.json");
+        std::fs::write(path.join("config.json"), b"{}").expect("failed to write config.json");
+        assert!(!is_complete_bundle(path));
+
+        // 3. One bundle item is a directory instead of a regular file
+        std::fs::create_dir(path.join("special_tokens_map.json")).expect("failed to create special_tokens_map dir");
+        std::fs::write(path.join("tokenizer_config.json"), b"{}").expect("failed to write tokenizer_config.json");
+        assert!(
+            !is_complete_bundle(path),
+            "directory matching bundle filename must not count as a file"
+        );
+
+        // Replace directory with actual file
+        std::fs::remove_dir(path.join("special_tokens_map.json")).expect("failed to remove dir");
+        std::fs::write(path.join("special_tokens_map.json"), b"{}").expect("failed to write special_tokens_map.json");
+
+        // 4. All BUNDLE_FILES present as files
+        assert!(is_complete_bundle(path));
+    }
+
+    #[test]
+    fn test_bundled_model_dir_and_bundled_model_detection() {
+        let test_model_name = "test_bundle_detection_temp_model";
+        let target_dir = Path::new(ASSET_DIR).join(test_model_name);
+
+        // Clean up beforehand just in case
+        if target_dir.exists() {
+            let _ = std::fs::remove_dir_all(&target_dir);
+        }
+
+        std::fs::create_dir_all(&target_dir).expect("failed to create model dir in ASSET_DIR");
+
+        struct Cleanup<'a>(&'a Path);
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0);
+            }
+        }
+        let _guard = Cleanup(&target_dir);
+
+        // Empty directory: neither dir nor full bundle detected
+        assert_eq!(bundled_model_dir(test_model_name), None);
+        assert_eq!(bundled_model(test_model_name), None);
+
+        // Add only model.onnx: bundled_model_dir succeeds, bundled_model fails (incomplete)
+        std::fs::write(target_dir.join("model.onnx"), b"fake_onnx").expect("failed to write model.onnx");
+        assert_eq!(bundled_model_dir(test_model_name), Some(target_dir.clone()));
+        assert_eq!(bundled_model(test_model_name), None);
+
+        // Add the rest of the bundle files
+        for file in BUNDLE_FILES {
+            if *file != "model.onnx" {
+                std::fs::write(target_dir.join(file), b"{}").expect("failed to write bundle file");
+            }
+        }
+
+        // Now both bundled_model_dir and bundled_model succeed
+        assert_eq!(bundled_model_dir(test_model_name), Some(target_dir.clone()));
+        assert_eq!(bundled_model(test_model_name), Some(target_dir.clone()));
     }
 
     /// A staged bundle is copied by build.rs into the asset dir with every
