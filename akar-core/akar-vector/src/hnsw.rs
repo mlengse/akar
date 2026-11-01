@@ -47,17 +47,13 @@ const M: usize = 16;
 const M_MAX: usize = 32;
 
 /// Maximum number of candidates to keep during the search for neighbours.
-const EF_CONSTRUCTION: usize = 128;
+/// Raised from 128 to 512 so that, on concentrated high-dimensional data,
+/// each inserted node evaluates a larger candidate pool to build good
+/// graph connections even at 50k–100k vector scale.
+const EF_CONSTRUCTION: usize = 512;
 
 /// Number of iterations for the multi-element pruning procedure.
 const MAX_M: usize = M_MAX;
-
-/// Relative slack factor for the diversity heuristic on high-dimensional
-/// vectors where distances concentrate tightly (T052). Allows near-equidistant
-/// same-cone neighbours to be retained instead of being backfilled with far
-/// orthogonal neighbours, improving top-k overlap without sacrificing
-/// angular diversity entirely.
-const DIVERSITY_ALPHA: f32 = 1.02;
 
 /// Size of the dynamic candidate list during search.
 const EF_SEARCH: usize = 200;
@@ -465,68 +461,6 @@ impl HnswIndex {
         out
     }
 
-    /// Select the `M` closest neighbours from a pre-sorted candidate list.
-    ///
-    /// Implements Malkov & Yashunin (2016) Algorithm 4 (HNSW heuristic with diversity):
-    /// candidates are processed in ascending distance order. A candidate is accepted
-    /// into `selected` if and only if it is closer to the new element than to every
-    /// already-selected neighbor (preventing cliques and ensuring angular diversity).
-    /// Rejected candidates are held in `pruned` to backfill if fewer than `m` neighbors
-    /// meet the strict diversity test.
-    fn get_node_vec<'a>(&'a self, node_id: usize, pending: Option<(usize, &'a [f32])>) -> Option<&'a [f32]> {
-        if let Some((p_id, p_vec)) = pending {
-            if node_id == p_id {
-                return Some(p_vec);
-            }
-        }
-        self.nodes.get(&node_id).map(|n| n.vector.as_slice())
-    }
-
-    fn select_neighbors_heuristic(
-        &self,
-        candidates: &[(f32, usize)],
-        m: usize,
-        pending: Option<(usize, &[f32])>,
-    ) -> Vec<usize> {
-        if candidates.is_empty() || m == 0 {
-            return Vec::new();
-        }
-        let m = m.min(candidates.len());
-        let mut selected: Vec<usize> = Vec::with_capacity(m);
-        let mut pruned: Vec<usize> = Vec::new();
-
-        for &(cand_dist, cand_id) in candidates {
-            if selected.len() >= m {
-                break;
-            }
-            let Some(cand_vec) = self.get_node_vec(cand_id, pending) else {
-                continue;
-            };
-            let closer_to_query_than_selected = selected.iter().all(|&sel_id| {
-                self.get_node_vec(sel_id, pending)
-                    .is_none_or(|sel_vec| cand_dist < DIVERSITY_ALPHA * self.metric.compute(cand_vec, sel_vec))
-            });
-            if closer_to_query_than_selected {
-                selected.push(cand_id);
-            } else {
-                pruned.push(cand_id);
-            }
-        }
-
-        for cand_id in pruned {
-            if selected.len() >= m {
-                break;
-            }
-            selected.push(cand_id);
-        }
-
-        selected
-    }
-
-    fn select_neighbors_simple(&self, candidates: &[(f32, usize)], m: usize) -> Vec<usize> {
-        self.select_neighbors_heuristic(candidates, m, None)
-    }
-
     // ---- Public API ----
 
     /// Insert a vector into the index with the given ID.
@@ -606,7 +540,12 @@ impl HnswIndex {
             let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION, EF_CONSTRUCTION);
 
             let m = if level == 0 { M_MAX } else { M };
-            let neighbors = self.select_neighbors_simple(&candidates, m);
+            // Pure proximity at all layers: take closest `m` candidates from the
+            // pre-sorted list (search_layer_0 returns ascending distance). On
+            // concentrated high-dimensional distances the diversity heuristic
+            // rejects same-cone neighbours and backfills with far orthogonal ones,
+            // collapsing top-k overlap.
+            let neighbors: Vec<usize> = candidates.iter().take(m).map(|(_, id)| *id).collect();
 
             // Add connections from new node to neighbours
             connections[level] = neighbors.clone();
@@ -648,7 +587,7 @@ impl HnswIndex {
                     .collect();
                 cand_list.push((d, id));
                 cand_list.sort_by(|a, b| a.0.total_cmp(&b.0));
-                let new_conns = self.select_neighbors_heuristic(&cand_list, max_conn, Some((id, &vector)));
+                let new_conns = cand_list.iter().take(max_conn).map(|(_, id)| *id).collect();
                 if let Some(n) = self.nodes.get_mut(&neighbor_id) {
                     n.connections[level] = new_conns;
                 }
