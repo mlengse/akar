@@ -2432,6 +2432,112 @@ mod tests {
     }
 
     #[test]
+    fn parse_compression_edge_cases() {
+        use akar_common::enums::CompressionType;
+
+        // Mixed case and variations for every supported compression variant
+        let supported_variants = [
+            ("UnCompressed", CompressionType::Uncompressed),
+            ("uNcOmPrEsSeD", CompressionType::Uncompressed),
+            ("cOnStAnT", CompressionType::Constant),
+            ("constant", CompressionType::Constant),
+            ("CONSTANT", CompressionType::Constant),
+            ("OneValue", CompressionType::OneValue),
+            ("onevalue", CompressionType::OneValue),
+            ("oneValue", CompressionType::OneValue),
+            ("Boolean", CompressionType::Boolean),
+            ("BOOLEAN", CompressionType::Boolean),
+            ("bOoLeAn", CompressionType::Boolean),
+            ("Integer_Bitpacking", CompressionType::IntegerBitpacking),
+            ("integer_bitpacking", CompressionType::IntegerBitpacking),
+            ("INTEGER_BITPACKING", CompressionType::IntegerBitpacking),
+            ("String_Dictionary", CompressionType::StringDictionary),
+            ("STRING_DICTIONARY", CompressionType::StringDictionary),
+            ("string_dictionary", CompressionType::StringDictionary),
+            ("float", CompressionType::Float),
+            ("FLOAT", CompressionType::Float),
+            ("fLoAt", CompressionType::Float),
+            ("List_Delta", CompressionType::ListDelta),
+            ("list_delta", CompressionType::ListDelta),
+            ("LIST_DELTA", CompressionType::ListDelta),
+        ];
+
+        for (input, expected) in supported_variants {
+            assert_eq!(
+                Binder::parse_compression(Some(input)).unwrap(),
+                expected,
+                "Failed to parse compression for '{input}'"
+            );
+        }
+
+        // Empty string and whitespace-only
+        let empty_err = Binder::parse_compression(Some("")).unwrap_err();
+        assert_eq!(empty_err.to_string(), "Unknown compression type: ");
+
+        let ws_err = Binder::parse_compression(Some("   ")).unwrap_err();
+        assert_eq!(ws_err.to_string(), "Unknown compression type:    ");
+
+        // Leading / trailing whitespace should not be accepted (must be exact)
+        let padded_err = Binder::parse_compression(Some(" UNCOMPRESSED ")).unwrap_err();
+        assert_eq!(padded_err.to_string(), "Unknown compression type:  UNCOMPRESSED ");
+
+        // Punctuation variations that are close to valid enum names but not exact
+        let close_variations = [
+            "INTEGER-BITPACKING",
+            "INTEGER BITPACKING",
+            "STRING-DICTIONARY",
+            "STRING DICTIONARY",
+            "LIST-DELTA",
+            "LIST DELTA",
+            "UN-COMPRESSED",
+            "UN COMPRESSED",
+            "ONE-VALUE",
+            "ONE VALUE",
+        ];
+        for invalid in close_variations {
+            let err = Binder::parse_compression(Some(invalid)).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("Unknown compression type: {invalid}"),
+                "Expected rejection for '{invalid}'"
+            );
+        }
+
+        // Common compression formats not supported by this binder
+        let unsupported_algorithms = [
+            "SNAPPY", "snappy", "LZ4", "lz4", "ZSTD", "zstd", "BROTLI", "brotli", "GZIP", "gzip", "DEFLATE", "BZIP2",
+            "XZ", "LZO",
+        ];
+        for algo in unsupported_algorithms {
+            let err = Binder::parse_compression(Some(algo)).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("Unknown compression type: {algo}"),
+                "Expected rejection for unsupported algorithm '{algo}'"
+            );
+        }
+
+        // Non-ASCII and unicode inputs
+        let unicode_inputs = [
+            "UNCOMPRESSED\0",
+            "UNCOMPRÉSSD",
+            "ÇONSTANT",
+            "🔥",
+            "NONE",
+            "NULL",
+            "DEFAULT",
+        ];
+        for u in unicode_inputs {
+            let err = Binder::parse_compression(Some(u)).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("Unknown compression type: {u}"),
+                "Expected rejection for unicode/special '{u}'"
+            );
+        }
+    }
+
+    #[test]
     fn parse_type_resolved_builtin_types() {
         let b = binder();
         assert_eq!(b.parse_type_resolved("INT64").unwrap(), LogicalTypeID::Int64);
