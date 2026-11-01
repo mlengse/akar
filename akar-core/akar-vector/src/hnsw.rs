@@ -39,24 +39,17 @@ use std::collections::BinaryHeap;
 // Constants (HNSW defaults matching the reference implementation)
 // ---------------------------------------------------------------------------
 
-/// Maximum number of connections per element per layer for construction.
-const M: usize = 16;
+/// Default maximum number of connections per element on upper layers.
+const DEFAULT_M: usize = 16;
 
-/// Maximum number of connections per element per layer for construction
-/// (used only at layer 0).
-const M_MAX: usize = 32;
+/// Default maximum number of connections per element on layer 0.
+const DEFAULT_M_MAX: usize = 32;
 
-/// Maximum number of candidates to keep during the search for neighbours.
-/// Raised from 128 to 512 so that, on concentrated high-dimensional data,
-/// each inserted node evaluates a larger candidate pool to build good
-/// graph connections even at 50k–100k vector scale.
-const EF_CONSTRUCTION: usize = 512;
+/// Default candidate list size explored during graph construction.
+const DEFAULT_EF_CONSTRUCTION: usize = 512;
 
-/// Number of iterations for the multi-element pruning procedure.
-const MAX_M: usize = M_MAX;
-
-/// Size of the dynamic candidate list during search.
-const EF_SEARCH: usize = 200;
+/// Default candidate list size explored during search traversal.
+const DEFAULT_EF_SEARCH: usize = 200;
 
 /// Vector count at or below which the index behaves as a flat vector store:
 /// every query scans all live vectors instead of traversing a graph (T064).
@@ -65,11 +58,6 @@ const EF_SEARCH: usize = 200;
 /// see `akar/SPEC.md` §12.3. Above this threshold, the graph traversal path is
 /// unmeasured and carries no build-time or recall promise.
 pub const EXACT_SEARCH_MAX_NODES: usize = 50_000;
-
-/// Maximum level generation factor: `1 / ln(M_max)`.
-fn ml() -> f64 {
-    1.0 / (M_MAX as f64).ln()
-}
 
 // ---------------------------------------------------------------------------
 // Distance function
@@ -142,6 +130,79 @@ impl PartialEq for Candidate {
 
 impl Eq for Candidate {}
 
+/// Structural and operational hyperparameters for the HNSW index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HnswConfig {
+    /// Maximum bidirectional connections per node on upper layers (layer > 0).
+    /// Standard range: 12..48. Default: 16.
+    pub m: usize,
+
+    /// Maximum bidirectional connections per node on layer 0 (ground layer).
+    /// Typically 2 * m. Standard range: 24..96. Default: 32.
+    pub m_max: usize,
+
+    /// Candidate list size explored during graph insertion.
+    /// Standard range: 128..1024. Default: 512.
+    pub ef_construction: usize,
+
+    /// Candidate list size explored during search traversal.
+    /// Standard range: 64..500. Default: 200.
+    pub ef_search: usize,
+}
+
+impl Default for HnswConfig {
+    fn default() -> Self {
+        Self {
+            m: DEFAULT_M,
+            m_max: DEFAULT_M_MAX,
+            ef_construction: DEFAULT_EF_CONSTRUCTION,
+            ef_search: DEFAULT_EF_SEARCH,
+        }
+    }
+}
+
+impl HnswConfig {
+    /// Create a new configuration with custom parameters, validating bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error message if:
+    /// - `m < 2`
+    /// - `m_max < m`
+    /// - `ef_construction < m`
+    /// - `ef_search < 1`
+    pub fn new(m: usize, m_max: usize, ef_construction: usize, ef_search: usize) -> Result<Self, &'static str> {
+        if m < 2 {
+            return Err("m must be >= 2");
+        }
+        if m_max < m {
+            return Err("m_max must be >= m");
+        }
+        if ef_construction < m {
+            return Err("ef_construction must be >= m");
+        }
+        if ef_search < 1 {
+            return Err("ef_search must be >= 1");
+        }
+        Ok(Self {
+            m,
+            m_max,
+            ef_construction,
+            ef_search,
+        })
+    }
+
+    /// High recall configuration profile (`m=24`, `m_max=48`, `ef_construction=512`, `ef_search=300`).
+    pub fn high_recall() -> Self {
+        Self {
+            m: 24,
+            m_max: 48,
+            ef_construction: 512,
+            ef_search: 300,
+        }
+    }
+}
+
 /// A node in the HNSW graph representing one vector.
 #[derive(Debug, Clone)]
 struct HnswNode {
@@ -184,6 +245,8 @@ pub struct HnswIndex {
     /// and consumed once to link a deterministic graph when it crosses
     /// `exact_threshold`.
     insertion_order: Vec<usize>,
+    /// Active structural and operational configuration.
+    config: HnswConfig,
 }
 
 impl HnswIndex {
@@ -192,7 +255,7 @@ impl HnswIndex {
     /// Starts as a flat vector store and builds the graph only when the corpus
     /// exceeds [`EXACT_SEARCH_MAX_NODES`].
     pub fn new(metric: DistanceMetric) -> Self {
-        Self::with_exact_threshold(metric, EXACT_SEARCH_MAX_NODES)
+        Self::with_config(metric, EXACT_SEARCH_MAX_NODES, HnswConfig::default())
     }
 
     /// Create an index with an explicit exact-scan threshold.
@@ -201,6 +264,11 @@ impl HnswIndex {
     /// is what the graph-level tests use; the default
     /// ([`EXACT_SEARCH_MAX_NODES`]) is what production callers get.
     pub fn with_exact_threshold(metric: DistanceMetric, exact_threshold: usize) -> Self {
+        Self::with_config(metric, exact_threshold, HnswConfig::default())
+    }
+
+    /// Create an index with an explicit exact-scan threshold and custom configuration.
+    pub fn with_config(metric: DistanceMetric, exact_threshold: usize, config: HnswConfig) -> Self {
         Self {
             nodes: AHashMap::new(),
             tombstones: AHashSet::new(),
@@ -211,7 +279,13 @@ impl HnswIndex {
             exact_threshold,
             graph_built: false,
             insertion_order: Vec::new(),
+            config,
         }
+    }
+
+    /// Returns a reference to the active [`HnswConfig`].
+    pub fn config(&self) -> &HnswConfig {
+        &self.config
     }
 
     /// Number of active vectors in the index (excluding tombstones).
@@ -314,9 +388,10 @@ impl HnswIndex {
             .rng_state
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
-        let r = (self.rng_state >> 33) as f64 / (1u64 << 31) as f64;
-        let level = (-r.ln() * ml()).floor() as usize;
-        level.min(MAX_M)
+        let r = ((self.rng_state >> 33) as f64 + 1.0) / ((1u64 << 31) as f64 + 1.0);
+        let ml = 1.0 / (self.config.m as f64).ln();
+        let level = (-r.ln() * ml).floor() as usize;
+        level.min(self.config.m_max)
     }
 
     /// Compute distance between the vector at `node_id` and a query vector.
@@ -339,21 +414,30 @@ impl HnswIndex {
         let mut current_dist = self.metric.compute(&current_node.vector, query);
 
         loop {
-            let mut improved = false;
+            let mut best_dist = current_dist;
+            let mut best_node = current;
+
             if layer < current_node.connections.len() {
                 for &neighbor in &current_node.connections[layer] {
                     if let Some(neighbor_node) = self.nodes.get(&neighbor) {
                         let d = self.metric.compute(&neighbor_node.vector, query);
-                        if d < current_dist {
-                            current_dist = d;
-                            current = neighbor;
-                            current_node = neighbor_node;
-                            improved = true;
+                        if d < best_dist {
+                            best_dist = d;
+                            best_node = neighbor;
                         }
                     }
                 }
             }
-            if !improved {
+
+            if best_node == current {
+                break;
+            }
+
+            current = best_node;
+            current_dist = best_dist;
+            if let Some(n) = self.nodes.get(&current) {
+                current_node = n;
+            } else {
                 break;
             }
         }
@@ -537,9 +621,15 @@ impl HnswIndex {
             // Find nearest neighbours at this layer (search the layer's own
             // connection set, not layer 0 — P51.16).
             let ep = self.greedy_search_at_layer(current_entry, &vector, level);
-            let candidates = self.search_layer_0(ep, &vector, level, EF_CONSTRUCTION, EF_CONSTRUCTION);
+            let candidates = self.search_layer_0(
+                ep,
+                &vector,
+                level,
+                self.config.ef_construction,
+                self.config.ef_construction,
+            );
 
-            let m = if level == 0 { M_MAX } else { M };
+            let m = if level == 0 { self.config.m_max } else { self.config.m };
             // Pure proximity at all layers: take closest `m` candidates from the
             // pre-sorted list (search_layer_0 returns ascending distance). On
             // concentrated high-dimensional distances the diversity heuristic
@@ -556,7 +646,7 @@ impl HnswIndex {
                     Some(n) => n,
                     None => continue,
                 };
-                let max_conn = if level == 0 { M_MAX } else { M };
+                let max_conn = if level == 0 { self.config.m_max } else { self.config.m };
                 let current_conn_len = if level < neighbor_node.connections.len() {
                     neighbor_node.connections[level].len()
                 } else {
@@ -657,7 +747,7 @@ impl HnswIndex {
     /// Returns a list of `(distance, node_id)` pairs sorted by distance
     /// (closest first).
     pub fn search(&self, query: &[f32], k: usize) -> Vec<(f32, usize)> {
-        self.search_with_ef(query, k, EF_SEARCH)
+        self.search_with_ef(query, k, self.config.ef_search)
     }
 
     /// Scan every live vector for the exact `k` nearest neighbours.
@@ -719,10 +809,16 @@ impl HnswIndex {
             return self.search_exact(query, k);
         };
 
-        // Phase 1: Greedy descent from top level to level 1
+        // Phase 1: Descent from top level to level 1
         let mut current = entry;
         for level in (1..=self.max_level).rev() {
-            current = self.greedy_search_at_layer(current, query, level);
+            let upper_ef = 16.min(ef);
+            let candidates = self.search_layer_0(current, query, level, 1, upper_ef);
+            if let Some(best) = candidates.first() {
+                current = best.1;
+            } else {
+                current = self.greedy_search_at_layer(current, query, level);
+            }
         }
 
         // Phase 2: Search at level 0, expanding a beam of `ef` candidates.
@@ -1148,11 +1244,11 @@ mod tests {
         let (idx, query) = dense_index(500, 16, 0xD1CE);
 
         let default = idx.search(&query, 10);
-        let explicit_default_beam = idx.search_with_ef(&query, 10, EF_SEARCH);
+        let explicit_default_beam = idx.search_with_ef(&query, 10, DEFAULT_EF_SEARCH);
 
         assert_eq!(
             default, explicit_default_beam,
-            "search() and search_with_ef(.., EF_SEARCH) must agree exactly"
+            "search() and search_with_ef(.., DEFAULT_EF_SEARCH) must agree exactly"
         );
     }
 

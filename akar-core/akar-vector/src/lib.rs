@@ -21,6 +21,7 @@ pub mod hnsw;
 pub use distance::{
     MIN_DIM_AVX, MIN_DIM_SIMD, batch_cosine_similarities, batch_dot_and_sq_norms, precompute_sq_norm, top_k_by_score,
 };
+pub use hnsw::{DistanceMetric, HnswConfig, HnswIndex};
 
 use akar_common::types::extract_f32_list;
 use akar_extension::{Extension, ExtensionContext};
