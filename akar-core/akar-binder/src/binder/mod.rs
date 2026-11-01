@@ -2378,6 +2378,87 @@ mod tests {
         assert!(Binder::parse_type("INVALID_TYPE").is_err());
         let err = Binder::parse_type("UNKNOWN_TYPE").unwrap_err();
         assert!(err.to_string().contains("Unknown type: UNKNOWN_TYPE"));
+        match err {
+            BinderError::Validation(msg) => {
+                assert_eq!(msg, "Unknown type: UNKNOWN_TYPE");
+            }
+            other => panic!("Expected BinderError::Validation, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_type_error_edge_cases() {
+        // Unknown standard SQL / alternate database types not supported by parse_type
+        let unsupported_types = [
+            "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "VARCHAR", "CHAR", "TEXT", "DECIMAL", "NUMERIC", "REAL",
+            "DATETIME", "BYTEA", "UUID", "ARRAY",
+        ];
+        for typ in unsupported_types {
+            let err = Binder::parse_type(typ).unwrap_err();
+            match &err {
+                BinderError::Validation(msg) => {
+                    assert_eq!(msg, &format!("Unknown type: {typ}"));
+                }
+                other => panic!("Expected BinderError::Validation for '{typ}', got {:?}", other),
+            }
+        }
+
+        // Empty string and whitespace variations
+        let empty_err = Binder::parse_type("").unwrap_err();
+        match empty_err {
+            BinderError::Validation(msg) => assert_eq!(msg, "Unknown type: "),
+            other => panic!("Expected BinderError::Validation, got {:?}", other),
+        }
+
+        let ws_err = Binder::parse_type("   ").unwrap_err();
+        match ws_err {
+            BinderError::Validation(msg) => assert_eq!(msg, "Unknown type:    "),
+            other => panic!("Expected BinderError::Validation, got {:?}", other),
+        }
+
+        // Leading / trailing whitespace around valid types (must fail without trimming)
+        let padded_types = [
+            " INT64", "INT64 ", " STRING ", "	BOOL", "DOUBLE
+",
+        ];
+        for padded in padded_types {
+            let err = Binder::parse_type(padded).unwrap_err();
+            match &err {
+                BinderError::Validation(msg) => {
+                    assert_eq!(msg, &format!("Unknown type: {padded}"));
+                }
+                other => panic!(
+                    "Expected BinderError::Validation for padded '{padded}', got {:?}",
+                    other
+                ),
+            }
+        }
+
+        // Malformed compound types (missing parens or unclosed brackets)
+        let malformed = [
+            "MAP", "STRUCT", "UNION", "INT64[", "INT64]", "[INT64", "INT64][", "INT64[10",
+        ];
+        for bad in malformed {
+            let err = Binder::parse_type(bad).unwrap_err();
+            match &err {
+                BinderError::Validation(msg) => {
+                    assert_eq!(msg, &format!("Unknown type: {bad}"));
+                }
+                other => panic!("Expected BinderError::Validation for '{bad}', got {:?}", other),
+            }
+        }
+
+        // Non-ASCII and unicode inputs
+        let unicode_types = ["INT64 ", "STRING™", "BÖÖL", "🚀", "int６4"];
+        for u in unicode_types {
+            let err = Binder::parse_type(u).unwrap_err();
+            match &err {
+                BinderError::Validation(msg) => {
+                    assert_eq!(msg, &format!("Unknown type: {u}"));
+                }
+                other => panic!("Expected BinderError::Validation for unicode '{u}', got {:?}", other),
+            }
+        }
     }
 
     #[test]
