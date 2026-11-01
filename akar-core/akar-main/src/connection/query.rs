@@ -1,5 +1,6 @@
 use super::Connection;
 use super::plan_cache::{CachedPlan, normalize_query};
+use super::retry;
 use crate::database::Database;
 use crate::prepared_statement::PreparedStatement;
 use crate::query_result::QueryResult;
@@ -131,33 +132,67 @@ impl Connection {
         // and concurrent modes) so MVCC records (VersionInfo/commit_history)
         // are populated and rollback/conflict handling works uniformly (P52.18).
         let is_write = Connection::is_write_statement(bound);
-        let mut txn_opt: Option<akar_transaction::Transaction> =
-            if is_write { Some(self.begin_write_txn()?) } else { None };
+        // A single-statement MERGE is the only statement that retries a
+        // transient OCC write conflict (FR-004). The conflict loser has no
+        // durable work to undo, so the whole begin/execute/commit cycle can run
+        // again against a fresh transaction. Explicit transactions never come
+        // through this path.
+        let retry_conflict = is_write
+            && retry::should_retry_statement(
+                bound,
+                self.explicit_txn_active.load(std::sync::atomic::Ordering::Acquire),
+            );
+        let mut conflict_retries: u32 = 0;
 
-        // Execute the query within a transaction scope
-        let query_result = self.execute_query_inner(bound, txn_opt.as_mut(), plan);
+        let query_result = loop {
+            let mut txn_opt: Option<akar_transaction::Transaction> =
+                if is_write { Some(self.begin_write_txn()?) } else { None };
 
-        // Commit or rollback based on result
-        match (is_write, &query_result) {
-            (true, Ok(_)) => {
-                if let Some(ref mut txn) = txn_opt {
-                    self.commit_write_txn(txn)?;
-                }
-            }
-            (true, Err(e)) => {
-                if let Some(ref mut txn) = txn_opt {
-                    match self.rollback_write_txn(txn) {
-                        Ok(_records) => {
-                            tracing::warn!("Transaction rolled back due to error: {e}");
+            // Execute the query within a transaction scope
+            let result = self.execute_query_inner(bound, txn_opt.as_mut(), plan);
+
+            // Commit or rollback based on result
+            match (is_write, result) {
+                (true, Ok(result)) => {
+                    if let Some(ref mut txn) = txn_opt
+                        && let Err(e) = self.commit_write_txn(txn)
+                    {
+                        if retry_conflict
+                            && retry::should_retry(conflict_retries)
+                            && retry::is_commit_write_conflict(&e)
+                        {
+                            let delay = retry::jittered_backoff_delay(conflict_retries);
+                            conflict_retries += 1;
+                            tracing::warn!(
+                                attempt = conflict_retries,
+                                max_retries = retry::MAX_WRITE_CONFLICT_RETRIES,
+                                "MERGE commit hit a write conflict; retrying in {delay:?}: {e}"
+                            );
+                            std::thread::sleep(delay);
+                            continue;
                         }
-                        Err(rollback_err) => {
-                            tracing::error!("Transaction rollback ALSO failed: {rollback_err} (original error: {e})");
+                        break Err(e);
+                    }
+                    break Ok(result);
+                }
+                (true, Err(e)) => {
+                    if let Some(ref mut txn) = txn_opt {
+                        match self.rollback_write_txn(txn) {
+                            Ok(_records) => {
+                                tracing::warn!("Transaction rolled back due to error: {e}");
+                            }
+                            Err(rollback_err) => {
+                                tracing::error!(
+                                    "Transaction rollback ALSO failed: {rollback_err} (original error: {e})"
+                                );
+                            }
                         }
                     }
+                    break Err(e);
                 }
+                (false, result) => break result,
             }
-            _ => {}
-        }
+        };
 
         // Post-commit vector index maintenance (WP-A1 / T014, T015).
         if query_result.is_ok() && Connection::is_write_statement(bound) {
@@ -336,21 +371,60 @@ impl Connection {
     pub fn execute(&self, prepared: &PreparedStatement, params: Vec<(&str, Value)>) -> Result<QueryResult, String> {
         let param_map = Self::build_param_map(prepared, params)?;
 
+        // Count the statement once per call so batch helpers measuring how many
+        // statements a batch is split into are not inflated by conflict
+        // retries (P131).
+        self.executed_statements
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // Same narrow retry scope as the literal path: only a single-statement
+        // MERGE retries an OCC write conflict (FR-004). Each attempt is a full
+        // auto-commit cycle, so a rolled-back loser simply runs again.
+        let retry_conflict = retry::should_retry_statement(
+            &prepared.bound_statement,
+            self.explicit_txn_active.load(std::sync::atomic::Ordering::Acquire),
+        );
+        let mut conflict_retries: u32 = 0;
+        loop {
+            match self.execute_prepared_once(prepared, &param_map) {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    if retry_conflict && retry::should_retry(conflict_retries) && retry::is_commit_write_conflict(&e) {
+                        let delay = retry::jittered_backoff_delay(conflict_retries);
+                        conflict_retries += 1;
+                        tracing::warn!(
+                            attempt = conflict_retries,
+                            max_retries = retry::MAX_WRITE_CONFLICT_RETRIES,
+                            "MERGE commit hit a write conflict; retrying in {delay:?}: {e}"
+                        );
+                        std::thread::sleep(delay);
+                        continue;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    /// One auto-commit attempt for a prepared statement.
+    ///
+    /// Split out of [`Connection::execute`] so a MERGE that loses OCC
+    /// validation can re-run the whole cycle in a fresh transaction.
+    fn execute_prepared_once(
+        &self,
+        prepared: &PreparedStatement,
+        param_map: &HashMap<String, Value>,
+    ) -> Result<QueryResult, String> {
         // Read-only databases reject any write statement (DDL or DML).
         if self.database.config.read_only && Connection::is_write_statement(&prepared.bound_statement) {
             return Err("Database is in read-only mode; write statements are not allowed".into());
         }
 
-        // Count the statement before execution so batch helpers can measure how
-        // many statements a batch is split into (P131).
-        self.executed_statements
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
         // Substitute parameters in the bound statement. Done before `handle_ddl`
         // so prepared DML (CREATE/MERGE) with `$param` in pattern properties gets
         // concrete values too (P51.31).
         let substituted =
-            crate::connection::substitute::substitute_params_in_statement(&prepared.bound_statement, &param_map)?;
+            crate::connection::substitute::substitute_params_in_statement(&prepared.bound_statement, param_map)?;
 
         // Every write statement is wrapped in a transaction so MVCC records
         // are populated and rollback/conflict handling works (P52.18). The

@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **MERGE auto-commit retries an OCC write conflict instead of failing the caller (feature 029, FR-001–FR-007, SC-001–SC-004)** · gates: `cargo test -p akar-main --lib connection::retry` **13 passed / 0 failed** · `cargo test -p akar-main` **625 passed / 0 failed across 68 binaries** · `concurrent_merges_leave_one_node` **10/10 runs** · three retry test binaries **60/60 runs**
+  - A single-statement `MERGE` that loses OCC validation in `TransactionManager::prepare_commit` now re-runs the whole `begin_write_txn → execute → commit_write_txn` cycle instead of returning `Transaction commit failed: write conflict on table … row … txn#N also modified this row`. Up to 12 retries (13 executions), exponential backoff from 2 ms doubling to a 32 ms cap, equal jitter inside `ceiling/2 ..= ceiling`. `std` only — no new dependency, no new `unsafe`, and `prepare_commit` / `commit` / `finish_commit` are untouched (P51.29/P60.2 intact).
+  - Scope is the implicit one-statement MERGE only. `should_retry_statement` requires both `is_merge_statement(bound)` and `!explicit_txn_active`, so a `MERGE` inside `BEGIN … COMMIT` and every non-MERGE write (`SET`, DDL, bulk path) keep reporting the conflict unchanged — fail-loud, no masking (FR-003/FR-004).
+  - **The retry was silently dead in the first implementation:** the binder emits `MERGE … SET …` as `BoundQuery { clauses: [BoundMerge, BoundSet, …] }`, not `BoundStatement::BoundMerge`. `is_merge_statement` now accepts both the standalone bound form and a `BoundQuery` whose first clause is `BoundMerge`; a query that only *contains* a later MERGE (`MATCH … MERGE …`) is deliberately out of scope.
+  - **Budget measured, not guessed:** 5 retries with plain `0..=ceiling` jitter still leaked a conflict to the caller about once per 40 statements under eight contending writers (4 of 15 runs failed; the full `akar-main` suite reproduced it once). A zero-length draw spends a retry on an immediate re-collision, so the window now carries a `ceiling/2` floor, and 13 executions put the residual failure rate at 0 in 40 runs while capping wasted time near 0.3 s — inside SC-002's 2 s. A permanently blocked writer still gets the original conflict error (deterministic `conflict_behavior::merge_fails_loud_after_persistent_conflict`).
+
 ### Added
 
 - **Incremental HNSW and secondary-index maintenance (feature 024, T003/T005/US4)** · gate `cargo test -p akar-storage --test secondary_index_sync_test` **2 passed / 0 failed** · `cargo test -p akar-processor --test physical_index_scan_test` **3 passed / 0 failed**

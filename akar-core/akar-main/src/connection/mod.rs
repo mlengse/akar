@@ -20,6 +20,7 @@ pub mod dml;
 pub mod fts_estimate;
 pub mod plan_cache;
 pub mod query;
+pub mod retry;
 pub mod standalone_call;
 pub mod substitute;
 pub mod transaction;
