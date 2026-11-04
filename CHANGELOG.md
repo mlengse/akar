@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-05
+
 ### Fixed
 
 - **MERGE auto-commit retries an OCC write conflict instead of failing the caller (feature 029, FR-001–FR-007, SC-001–SC-004)** · commit `39e09d2` · gates: `cargo test -p akar-main --lib connection::retry` **13 passed / 0 failed** · `cargo test -p akar-main` **625 passed / 0 failed across 68 binaries** · `concurrent_merges_leave_one_node` **10/10 runs** · three retry test binaries **60/60 runs**
@@ -1080,6 +1082,7 @@
 [0.1.4]: https://github.com/mlengse/akar/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/mlengse/akar/compare/v0.1.1...v0.1.2
+[0.3.4]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.4
 [0.3.3]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.3
 [0.3.2]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.2
 [0.3.0]: https://github.com/mlengse/akar/compare/v0.1.2...v0.3.0
