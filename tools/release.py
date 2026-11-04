@@ -580,6 +580,11 @@ def publish_crate(crate_name: str, version: str) -> bool:
         # Remove [lints] workspace = true section (not needed for crates.io)
         text = re.sub(r'\[lints\]\s*\nworkspace\s*=\s*true\s*\n?', '', text)
 
+        # Remove self-referencing dependencies (dev-dependencies that point to self)
+        # e.g., akar-main = { path = ".", ... } or akar-main = { features = [...] } in akar-main's own Cargo.toml
+        self_ref_pattern = rf'^\s*{re.escape(crate_name)}\s*=\s*\{{[^}}]*\}}'
+        text = re.sub(self_ref_pattern, f'# {crate_name} = {{  # self-ref removed for publish', text, flags=re.MULTILINE)
+
         ct.write_text(text, encoding="utf-8")
 
         # Generate lockfile in standalone copy
