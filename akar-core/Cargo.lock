@@ -290,6 +290,7 @@ dependencies = [
  "akar-extension",
  "akar-function",
  "arrow",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tracing",

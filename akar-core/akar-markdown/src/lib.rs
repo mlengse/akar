@@ -34,9 +34,10 @@
 //! ```
 
 mod extension;
-mod frontmatter;
+pub mod frontmatter;
 mod wiki;
 mod wikilink;
+pub mod yaml;
 
 pub use extension::MarkdownExtension;
 pub use frontmatter::{FrontMatter, FrontMatterValue};

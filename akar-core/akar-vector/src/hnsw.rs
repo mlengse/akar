@@ -131,7 +131,7 @@ impl PartialEq for Candidate {
 impl Eq for Candidate {}
 
 /// Structural and operational hyperparameters for the HNSW index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HnswConfig {
     /// Maximum bidirectional connections per node on upper layers (layer > 0).
     /// Standard range: 12..48. Default: 16.
@@ -148,6 +148,10 @@ pub struct HnswConfig {
     /// Candidate list size explored during search traversal.
     /// Standard range: 64..500. Default: 200.
     pub ef_search: usize,
+
+    /// Heuristic relaxation factor alpha for neighbor selection.
+    /// Standard range: 1.0..2.0. Default: 1.2.
+    pub alpha: f32,
 }
 
 impl Default for HnswConfig {
@@ -157,6 +161,7 @@ impl Default for HnswConfig {
             m_max: DEFAULT_M_MAX,
             ef_construction: DEFAULT_EF_CONSTRUCTION,
             ef_search: DEFAULT_EF_SEARCH,
+            alpha: 1.2,
         }
     }
 }
@@ -172,6 +177,17 @@ impl HnswConfig {
     /// - `ef_construction < m`
     /// - `ef_search < 1`
     pub fn new(m: usize, m_max: usize, ef_construction: usize, ef_search: usize) -> Result<Self, &'static str> {
+        Self::with_alpha(m, m_max, ef_construction, ef_search, 1.2)
+    }
+
+    /// Create a new configuration with custom parameters and explicit alpha.
+    pub fn with_alpha(
+        m: usize,
+        m_max: usize,
+        ef_construction: usize,
+        ef_search: usize,
+        alpha: f32,
+    ) -> Result<Self, &'static str> {
         if m < 2 {
             return Err("m must be >= 2");
         }
@@ -184,11 +200,15 @@ impl HnswConfig {
         if ef_search < 1 {
             return Err("ef_search must be >= 1");
         }
+        if alpha < 1.0 {
+            return Err("alpha must be >= 1.0");
+        }
         Ok(Self {
             m,
             m_max,
             ef_construction,
             ef_search,
+            alpha,
         })
     }
 
@@ -199,6 +219,7 @@ impl HnswConfig {
             m_max: 48,
             ef_construction: 512,
             ef_search: 300,
+            alpha: 1.2,
         }
     }
 }
@@ -343,6 +364,44 @@ impl HnswIndex {
     /// `false` while the corpus is at or below the exact-scan threshold.
     pub fn is_graph_built(&self) -> bool {
         self.graph_built
+    }
+
+    /// Export graph topology: returns None if graph is not built or index has no entry point.
+    /// Otherwise returns `(entry_point, max_level, Vec<(node_id, Vec<Vec<usize>>)>)`.
+    pub fn export_graph_topology(&self) -> Option<(usize, usize, Vec<(usize, Vec<Vec<usize>>)>)> {
+        if !self.graph_built {
+            return None;
+        }
+        let ep = self.entry_point?;
+        let mut conns = Vec::with_capacity(self.nodes.len());
+        for (&id, node) in &self.nodes {
+            if !self.tombstones.contains(&id) {
+                conns.push((id, node.connections.clone()));
+            }
+        }
+        conns.sort_by_key(|&(id, _)| id);
+        Some((ep, self.max_level, conns))
+    }
+
+    /// Import persisted graph topology directly without re-searching neighbors.
+    ///
+    /// Replaces node connections, sets entry point and max_level, and marks `graph_built = true`.
+    pub fn import_graph_topology(
+        &mut self,
+        entry_point: usize,
+        max_level: usize,
+        connections: Vec<(usize, Vec<Vec<usize>>)>,
+    ) -> Result<(), &'static str> {
+        for (id, node_conns) in connections {
+            if let Some(node) = self.nodes.get_mut(&id) {
+                node.connections = node_conns;
+            }
+        }
+        self.entry_point = Some(entry_point);
+        self.max_level = max_level;
+        self.graph_built = true;
+        self.insertion_order.clear();
+        Ok(())
     }
 
     /// Get the distance metric used by this index.
@@ -545,7 +604,90 @@ impl HnswIndex {
         out
     }
 
+    /// Helper to retrieve a vector slice for a node, accounting for the node currently being inserted.
+    fn get_node_vector<'a>(&'a self, node_id: usize, new_id: usize, new_vec: &'a [f32]) -> Option<&'a [f32]> {
+        if node_id == new_id {
+            Some(new_vec)
+        } else {
+            self.nodes.get(&node_id).map(|n| n.vector.as_slice())
+        }
+    }
+
+    /// Select neighbors using the heuristic relaxation algorithm (HNSW Algorithm 4 with alpha relaxation).
+    ///
+    /// Accepts a candidate `e` if for all already selected neighbors `r` in `result`:
+    /// `dist(base, e) < alpha * dist(r, e)`.
+    ///
+    /// If fewer than `m` candidates satisfy the relaxed diversity criterion,
+    /// remaining slots are backfilled with the closest unselected candidates up to `m`.
+    fn select_neighbors_heuristic(
+        &self,
+        new_id: usize,
+        new_vec: &[f32],
+        candidates: &[(f32, usize)],
+        m: usize,
+    ) -> Vec<usize> {
+        if candidates.len() <= m {
+            return candidates.iter().map(|(_, id)| *id).collect();
+        }
+
+        let mut result: Vec<usize> = Vec::with_capacity(m);
+        let mut skipped: Vec<usize> = Vec::new();
+
+        for &(d_base_e, cand_id) in candidates {
+            if result.len() >= m {
+                break;
+            }
+            let cand_vec = match self.get_node_vector(cand_id, new_id, new_vec) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let mut is_diverse = true;
+            for &selected_id in &result {
+                if let Some(selected_vec) = self.get_node_vector(selected_id, new_id, new_vec) {
+                    let d_r_e = self.metric.compute(selected_vec, cand_vec);
+                    if d_base_e >= self.config.alpha * d_r_e {
+                        is_diverse = false;
+                        break;
+                    }
+                }
+            }
+
+            if is_diverse {
+                result.push(cand_id);
+            } else {
+                skipped.push(cand_id);
+            }
+        }
+
+        // Backfill if diversity pruning resulted in fewer than `m` neighbors
+        if result.len() < m {
+            for cand_id in skipped {
+                if result.len() >= m {
+                    break;
+                }
+                result.push(cand_id);
+            }
+        }
+
+        result
+    }
+
     // ---- Public API ----
+
+    /// Insert a vector directly into the node map without triggering graph construction.
+    /// Used by storage loaders when importing a persisted graph topology.
+    pub fn insert_flat(&mut self, vector: Vec<f32>, id: usize) {
+        self.tombstones.remove(&id);
+        self.nodes.insert(
+            id,
+            HnswNode {
+                vector,
+                connections: Vec::new(),
+            },
+        );
+    }
 
     /// Insert a vector into the index with the given ID.
     ///
@@ -630,12 +772,7 @@ impl HnswIndex {
             );
 
             let m = if level == 0 { self.config.m_max } else { self.config.m };
-            // Pure proximity at all layers: take closest `m` candidates from the
-            // pre-sorted list (search_layer_0 returns ascending distance). On
-            // concentrated high-dimensional distances the diversity heuristic
-            // rejects same-cone neighbours and backfills with far orthogonal ones,
-            // collapsing top-k overlap.
-            let neighbors: Vec<usize> = candidates.iter().take(m).map(|(_, id)| *id).collect();
+            let neighbors = self.select_neighbors_heuristic(id, &vector, &candidates, m);
 
             // Add connections from new node to neighbours
             connections[level] = neighbors.clone();
@@ -665,7 +802,7 @@ impl HnswIndex {
                     continue;
                 }
 
-                // Shrink neighbor's connections to max_conn using diversity heuristic (Algorithm 4)
+                // Shrink neighbor's connections to max_conn using relaxed diversity heuristic (Algorithm 4)
                 let d = self.metric.compute(&vector, &neighbor_node.vector);
                 let mut cand_list: Vec<(f32, usize)> = neighbor_node.connections[level]
                     .iter()
@@ -677,7 +814,7 @@ impl HnswIndex {
                     .collect();
                 cand_list.push((d, id));
                 cand_list.sort_by(|a, b| a.0.total_cmp(&b.0));
-                let new_conns = cand_list.iter().take(max_conn).map(|(_, id)| *id).collect();
+                let new_conns = self.select_neighbors_heuristic(id, &vector, &cand_list, max_conn);
                 if let Some(n) = self.nodes.get_mut(&neighbor_id) {
                     n.connections[level] = new_conns;
                 }

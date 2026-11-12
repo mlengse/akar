@@ -14,15 +14,16 @@
 //!
 //! # Output contract
 //!
-//! Exactly two columns, in this order:
+//! Exactly three columns, in this order:
 //!
 //! | column | type | nullable | contents |
 //! |--------|------|----------|----------|
 //! | `node` | STRING | no | a note id |
 //! | `rel`  | STRING | yes | the raw `[[wikilink]]` target on a link row, `NULL` on the note's own row |
+//! | `metadata` | STRING | yes | JSON-serialized OKF v0.2 frontmatter on the note's own row, `NULL` on link rows |
 //!
 //! Rows are emitted note by note, in graph order (ids ascending): first the
-//! note's own row `(id, NULL)`, then one `(id, target)` row per link in the
+//! note's own row `(id, NULL, metadata)`, then one `(id, target, NULL)` row per link in the
 //! note body, in document order. Targets are emitted exactly as written, with no
 //! resolution to note ids. Repeated links therefore produce repeated rows; use
 //! [`crate::WikiGraph::relations`] for a deduplicated edge list.
@@ -92,22 +93,35 @@ fn read_markdown_wiki(args: &[Value], chunk: &mut DataChunk) -> Result<(), Strin
 
     let mut nodes: Vec<String> = Vec::new();
     let mut relations: Vec<Option<String>> = Vec::new();
+    let mut metadatas: Vec<Option<String>> = Vec::new();
     for note in &graph.notes {
+        let meta_json = if note.frontmatter.is_empty() {
+            None
+        } else {
+            Some(note.frontmatter.to_json().to_string())
+        };
         nodes.push(note.id.clone());
         relations.push(None);
+        metadatas.push(meta_json);
         for link in &note.links {
             nodes.push(note.id.clone());
             relations.push(Some(link.target.clone()));
+            metadatas.push(None);
         }
     }
 
     let size = nodes.len();
     let node_column: ArrayRef = Arc::new(StringArray::from_iter_values(nodes.iter().map(String::as_str)));
     let rel_column: ArrayRef = Arc::new(StringArray::from_iter(relations.iter().map(|target| target.as_deref())));
+    let meta_column: ArrayRef = Arc::new(StringArray::from_iter(metadatas.iter().map(|meta| meta.as_deref())));
 
-    chunk.fields = vec![node_column, rel_column];
-    chunk.field_types = vec![PhysicalTypeID::String, PhysicalTypeID::String];
-    chunk.field_names = vec!["node".into(), "rel".into()];
+    chunk.fields = vec![node_column, rel_column, meta_column];
+    chunk.field_types = vec![
+        PhysicalTypeID::String,
+        PhysicalTypeID::String,
+        PhysicalTypeID::String,
+    ];
+    chunk.field_names = vec!["node".into(), "rel".into(), "metadata".into()];
     chunk.size = size;
     Ok(())
 }
@@ -180,8 +194,18 @@ mod tests {
         execute(&[Value::String(dir.path().to_string_lossy().into_owned())], &mut chunk).expect("execute");
 
         assert_eq!(chunk.size, 4);
-        assert_eq!(chunk.field_names, vec!["node".to_string(), "rel".to_string()]);
-        assert_eq!(chunk.field_types, vec![PhysicalTypeID::String, PhysicalTypeID::String]);
+        assert_eq!(
+            chunk.field_names,
+            vec!["node".to_string(), "rel".to_string(), "metadata".to_string()]
+        );
+        assert_eq!(
+            chunk.field_types,
+            vec![
+                PhysicalTypeID::String,
+                PhysicalTypeID::String,
+                PhysicalTypeID::String
+            ]
+        );
 
         let nodes = chunk.fields[0]
             .as_any()
@@ -191,15 +215,23 @@ mod tests {
             .as_any()
             .downcast_ref::<StringArray>()
             .expect("rel column is a StringArray");
+        let metas = chunk.fields[2]
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("metadata column is a StringArray");
 
         assert_eq!(nodes.value(0), "a");
         assert!(rels.is_null(0), "the note's own row carries a NULL rel");
+        assert!(metas.is_null(0), "unfrontmattered note has NULL metadata");
         assert_eq!(nodes.value(1), "a");
         assert_eq!(rels.value(1), "b");
+        assert!(metas.is_null(1));
         assert_eq!(nodes.value(2), "a");
         assert_eq!(rels.value(2), "c");
+        assert!(metas.is_null(2));
         assert_eq!(nodes.value(3), "b");
         assert!(rels.is_null(3), "the note's own row carries a NULL rel");
+        assert!(metas.is_null(3));
     }
 
     #[test]
@@ -217,7 +249,10 @@ mod tests {
         execute(&args, &mut chunk).expect("second call");
         assert_eq!(chunk.size, size);
         assert_eq!(chunk.fields.len(), fields);
-        assert_eq!(chunk.field_names, vec!["node".to_string(), "rel".to_string()]);
+        assert_eq!(
+            chunk.field_names,
+            vec!["node".to_string(), "rel".to_string(), "metadata".to_string()]
+        );
     }
 
     #[test]

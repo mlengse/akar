@@ -45,13 +45,121 @@ use std::collections::BTreeMap;
 /// UTF-8 byte order mark, which may precede the opening `---` line.
 const BOM: char = '\u{feff}';
 
-/// A value stored under a frontmatter key.
+/// A value stored under a frontmatter key, supporting full OKF v0.2 nested structures.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FrontMatterValue {
-    /// A single scalar value, with surrounding quotes removed.
+    /// A single scalar string value, with surrounding quotes removed.
     Scalar(String),
-    /// A list of scalar values, in the order they were written.
-    List(Vec<String>),
+    /// A list of frontmatter values, in document order.
+    List(Vec<FrontMatterValue>),
+    /// A nested mapping of key-value frontmatter entries.
+    Map(BTreeMap<String, FrontMatterValue>),
+    /// A boolean value (`true` or `false`).
+    Bool(bool),
+    /// A numeric value.
+    Number(f64),
+    /// Null / empty value.
+    Null,
+}
+
+impl FrontMatterValue {
+    /// Returns the string slice if this is a Scalar.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            FrontMatterValue::Scalar(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Returns the list slice if this is a List.
+    pub fn as_list(&self) -> Option<&[FrontMatterValue]> {
+        match self {
+            FrontMatterValue::List(l) => Some(l.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// Returns the map reference if this is a Map.
+    pub fn as_map(&self) -> Option<&BTreeMap<String, FrontMatterValue>> {
+        match self {
+            FrontMatterValue::Map(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Convert to serde_json::Value.
+    pub fn to_json(&self) -> serde_json::Value {
+        self.clone().into()
+    }
+
+    /// Construct from serde_json::Value.
+    pub fn from_json(val: serde_json::Value) -> Self {
+        val.into()
+    }
+
+    /// Convert to Akar's native query engine Value.
+    pub fn to_akar_value(&self) -> akar_common::types::Value {
+        match self {
+            FrontMatterValue::Null => akar_common::types::Value::Null,
+            FrontMatterValue::Bool(b) => akar_common::types::Value::Bool(*b),
+            FrontMatterValue::Number(n) => akar_common::types::Value::Double(*n),
+            FrontMatterValue::Scalar(s) => akar_common::types::Value::String(s.clone()),
+            FrontMatterValue::List(items) => {
+                akar_common::types::Value::List(items.iter().map(|it| it.to_akar_value()).collect())
+            }
+            FrontMatterValue::Map(_) => akar_common::types::Value::Json(self.clone().into()),
+        }
+    }
+}
+
+impl From<serde_json::Value> for FrontMatterValue {
+    fn from(json: serde_json::Value) -> Self {
+        match json {
+            serde_json::Value::Null => FrontMatterValue::Null,
+            serde_json::Value::Bool(b) => FrontMatterValue::Bool(b),
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64() {
+                    FrontMatterValue::Number(f)
+                } else {
+                    FrontMatterValue::Scalar(n.to_string())
+                }
+            }
+            serde_json::Value::String(s) => FrontMatterValue::Scalar(s),
+            serde_json::Value::Array(arr) => {
+                FrontMatterValue::List(arr.into_iter().map(FrontMatterValue::from).collect())
+            }
+            serde_json::Value::Object(obj) => {
+                let mut map = BTreeMap::new();
+                for (k, v) in obj {
+                    map.insert(k, FrontMatterValue::from(v));
+                }
+                FrontMatterValue::Map(map)
+            }
+        }
+    }
+}
+
+impl From<FrontMatterValue> for serde_json::Value {
+    fn from(fm: FrontMatterValue) -> Self {
+        match fm {
+            FrontMatterValue::Null => serde_json::Value::Null,
+            FrontMatterValue::Bool(b) => serde_json::Value::Bool(b),
+            FrontMatterValue::Number(n) => serde_json::Number::from_f64(n)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            FrontMatterValue::Scalar(s) => serde_json::Value::String(s),
+            FrontMatterValue::List(list) => {
+                serde_json::Value::Array(list.into_iter().map(serde_json::Value::from).collect())
+            }
+            FrontMatterValue::Map(map) => {
+                let mut obj = serde_json::Map::new();
+                for (k, v) in map {
+                    obj.insert(k, serde_json::Value::from(v));
+                }
+                serde_json::Value::Object(obj)
+            }
+        }
+    }
 }
 
 /// The parsed YAML frontmatter of a single note.
@@ -64,9 +172,32 @@ pub struct FrontMatter {
 }
 
 impl FrontMatter {
+    /// Parse YAML frontmatter from document text.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let s = split(text);
+        Ok(s.frontmatter)
+    }
+
     /// Look up an entry by its exact key.
     pub fn get(&self, key: &str) -> Option<&FrontMatterValue> {
         self.entries.get(key)
+    }
+
+    /// Look up a nested entry following path segments, e.g. `["meta", "author"]`.
+    pub fn get_nested(&self, path: &[&str]) -> Option<&FrontMatterValue> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut current = self.entries.get(path[0])?;
+        for &segment in &path[1..] {
+            match current {
+                FrontMatterValue::Map(map) => {
+                    current = map.get(segment)?;
+                }
+                _ => return None,
+            }
+        }
+        Some(current)
     }
 
     /// The `title` entry when it is a non-empty scalar.
@@ -109,11 +240,33 @@ impl FrontMatter {
         self.entries.iter().map(|(key, value)| (key.as_str(), value))
     }
 
+    /// Convert entire frontmatter to JSON.
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        for (k, v) in &self.entries {
+            map.insert(k.clone(), serde_json::Value::from(v.clone()));
+        }
+        serde_json::Value::Object(map)
+    }
+
+    /// Convert frontmatter to Akar Value::Json.
+    pub fn to_akar_value(&self) -> akar_common::types::Value {
+        akar_common::types::Value::Json(self.to_json())
+    }
+
     /// Read `key` as a list of strings, accepting the scalar form too.
     fn string_list(&self, key: &str) -> Vec<String> {
         match self.entries.get(key) {
             Some(FrontMatterValue::Scalar(value)) if !value.trim().is_empty() => vec![value.clone()],
-            Some(FrontMatterValue::List(items)) => items.clone(),
+            Some(FrontMatterValue::List(items)) => items
+                .iter()
+                .filter_map(|item| match item {
+                    FrontMatterValue::Scalar(s) => Some(s.clone()),
+                    FrontMatterValue::Bool(b) => Some(b.to_string()),
+                    FrontMatterValue::Number(n) => Some(n.to_string()),
+                    _ => None,
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -182,6 +335,19 @@ pub(crate) fn split(text: &str) -> Split<'_> {
 
 /// Parse the lines between the opening and closing `---` markers.
 fn parse_block(block: &[&str]) -> FrontMatter {
+    let joined = block.join("\n");
+    if let Ok(serde_json::Value::Object(map)) = crate::yaml::parse(&joined) {
+        let mut frontmatter = FrontMatter::default();
+        for (k, v) in map {
+            let val = match v {
+                serde_json::Value::Null => FrontMatterValue::Scalar(String::new()),
+                other => FrontMatterValue::from(other),
+            };
+            frontmatter.entries.insert(k, val);
+        }
+        return frontmatter;
+    }
+
     let mut frontmatter = FrontMatter::default();
     let mut index = 0;
     while index < block.len() {
@@ -212,7 +378,7 @@ fn parse_block(block: &[&str]) -> FrontMatter {
                     break;
                 };
                 if !item.is_empty() {
-                    items.push(parse_scalar(item));
+                    items.push(FrontMatterValue::Scalar(parse_scalar(item)));
                 }
                 scan += 1;
             }
@@ -310,7 +476,12 @@ fn skip_indented_block(block: &[&str], from: usize) -> Option<usize> {
 /// constructs listed in the module documentation.
 fn parse_value(value: &str) -> Option<FrontMatterValue> {
     if let Some(inner) = delimited_by(value, '[', ']') {
-        return Some(FrontMatterValue::List(parse_inline_list(inner)));
+        return Some(FrontMatterValue::List(
+            parse_inline_list(inner)
+                .into_iter()
+                .map(FrontMatterValue::Scalar)
+                .collect(),
+        ));
     }
     if delimited_by(value, '{', '}').is_some() {
         return None;
@@ -484,11 +655,11 @@ mod tests {
     #[test]
     fn test_double_quote_escapes() {
         let frontmatter = frontmatter_of("---\npath: \"a\\\\b\"\nliteral: \"a\\nb\"\n---\n");
-        // `\\` collapses to a single backslash, other escapes stay verbatim.
+        // Standard YAML double-quote unescaping: `\\` -> `\`, `\n` -> newline.
         assert_eq!(frontmatter.get("path"), Some(&FrontMatterValue::Scalar("a\\b".into())));
         assert_eq!(
             frontmatter.get("literal"),
-            Some(&FrontMatterValue::Scalar("a\\nb".into()))
+            Some(&FrontMatterValue::Scalar("a\nb".into()))
         );
     }
 
@@ -497,7 +668,10 @@ mod tests {
         let frontmatter = frontmatter_of("---\ntags:\n  - rust\n  - graph\nother: x\n---\n");
         assert_eq!(
             frontmatter.get("tags"),
-            Some(&FrontMatterValue::List(vec!["rust".into(), "graph".into()]))
+            Some(&FrontMatterValue::List(vec![
+                FrontMatterValue::Scalar("rust".into()),
+                FrontMatterValue::Scalar("graph".into())
+            ]))
         );
         assert_eq!(frontmatter.get("other"), Some(&FrontMatterValue::Scalar("x".into())));
         assert_eq!(frontmatter.tags(), vec!["rust", "graph"]);
@@ -572,14 +746,27 @@ mod tests {
     #[test]
     fn test_unsupported_constructs_skipped() {
         let frontmatter = frontmatter_of(
-            "---\nnested:\n  a: 1\n  b: 2\nflow: {a: 1}\nanchored: &anchor value\nblock: |\n  line one\n  line two\nempty:\n---\n",
+            "---\nanchored: &anchor value\nempty:\n---\n",
         );
-        assert!(frontmatter.get("nested").is_none());
-        assert!(frontmatter.get("flow").is_none());
         assert!(frontmatter.get("anchored").is_none());
-        assert!(frontmatter.get("block").is_none());
         assert_eq!(frontmatter.get("empty"), Some(&FrontMatterValue::Scalar(String::new())));
         assert_eq!(frontmatter.len(), 1);
+    }
+
+    #[test]
+    fn test_nested_maps_and_okf_frontmatter() {
+        let frontmatter = frontmatter_of(
+            "---\nnested:\n  a: 1\n  b: 2\nflow: [1, 2]\n---\n",
+        );
+        assert!(frontmatter.get("nested").is_some());
+        assert_eq!(
+            frontmatter.get_nested(&["nested", "a"]),
+            Some(&FrontMatterValue::Number(1.0))
+        );
+        assert_eq!(
+            frontmatter.get_nested(&["nested", "b"]),
+            Some(&FrontMatterValue::Number(2.0))
+        );
     }
 
     #[test]

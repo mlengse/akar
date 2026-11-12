@@ -77,7 +77,7 @@ parquet = "60.0.0"
 proptest = "1.6"
 arrow = { workspace = true }
 criterion.workspace = true
-akar-main = { path = ".", features = ["vector-extension"] }
+akar-main = { path = ".", features = ["vector-extension", "markdown-extension"] }
 
 [[bench]]
 name = "query_pipeline"

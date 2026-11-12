@@ -22,8 +22,14 @@ use akar_vector::hnsw::{DistanceMetric, HnswIndex};
 /// - bytes 28..31: dimensions (u32 LE)
 /// - byte  32:     metric (0=Cosine, 1=Euclidean, 2=L1, 3=L2Squared, 4=DotProduct)
 /// - byte  33:     precision (0=F32, 1=F64)
-/// - bytes 34..47: reserved
-const HEADER_SIZE: usize = 48;
+/// - bytes 34..41: conn_page_start (u64 LE)
+/// - bytes 42..49: conn_page_count (u64 LE)
+/// - bytes 50..51: format_version (u16 LE: 1=Legacy flat, 2=Graph-backed)
+/// - bytes 52..63: reserved
+pub const FORMAT_VERSION_LEGACY: u16 = 1;
+pub const FORMAT_VERSION_GRAPH_V2: u16 = 2;
+const HEADER_SIZE: usize = 64;
+const LEGACY_HEADER_SIZE: usize = 48;
 
 /// Vector element precision used when serializing the index to disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,6 +65,9 @@ fn serialize_header(
     dimensions: u32,
     metric: &DistanceMetric,
     precision: VectorPrecision,
+    conn_page_start: u64,
+    conn_page_count: u64,
+    format_version: u16,
 ) -> Vec<u8> {
     let mut buf = vec![0u8; HEADER_SIZE];
     buf[0..8].copy_from_slice(&0x484E5357u64.to_le_bytes()); // magic
@@ -76,11 +85,26 @@ fn serialize_header(
     };
     buf[32] = metric_byte;
     buf[33] = precision.byte();
+    buf[34..42].copy_from_slice(&conn_page_start.to_le_bytes());
+    buf[42..50].copy_from_slice(&conn_page_count.to_le_bytes());
+    buf[50..52].copy_from_slice(&format_version.to_le_bytes());
     buf
 }
 
-fn deserialize_header(buf: &[u8]) -> Option<(u64, Option<usize>, usize, u32, DistanceMetric, VectorPrecision)> {
-    if buf.len() < HEADER_SIZE {
+fn deserialize_header(
+    buf: &[u8],
+) -> Option<(
+    u64,
+    Option<usize>,
+    usize,
+    u32,
+    DistanceMetric,
+    VectorPrecision,
+    u64,
+    u64,
+    u16,
+)> {
+    if buf.len() < LEGACY_HEADER_SIZE {
         return None;
     }
     let magic = u64::from_le_bytes(buf[0..8].try_into().ok()?);
@@ -101,7 +125,25 @@ fn deserialize_header(buf: &[u8]) -> Option<(u64, Option<usize>, usize, u32, Dis
         _ => return None,
     };
     let precision = VectorPrecision::from_byte(buf[33]).unwrap_or(VectorPrecision::F32);
-    Some((num_vectors, entry_point, max_level, dimensions, metric, precision))
+    let (conn_page_start, conn_page_count, format_version) = if buf.len() >= HEADER_SIZE {
+        let cp_start = u64::from_le_bytes(buf[34..42].try_into().unwrap_or([0; 8]));
+        let cp_count = u64::from_le_bytes(buf[42..50].try_into().unwrap_or([0; 8]));
+        let f_ver = u16::from_le_bytes(buf[50..52].try_into().unwrap_or([1, 0]));
+        (cp_start, cp_count, f_ver)
+    } else {
+        (0, 0, FORMAT_VERSION_LEGACY)
+    };
+    Some((
+        num_vectors,
+        entry_point,
+        max_level,
+        dimensions,
+        metric,
+        precision,
+        conn_page_start,
+        conn_page_count,
+        format_version,
+    ))
 }
 
 /// A persisted vector index that wraps `HnswIndex` with BufferManager-backed storage.
@@ -188,28 +230,9 @@ impl VectorIndexTable {
         let num_vectors = nodes.len() as u64;
         let entry_point = self.hnsw.entry_point();
         let max_level = self.hnsw.max_level();
+        let graph_topology = self.hnsw.export_graph_topology();
 
-        // Serialize header
-        let header = serialize_header(
-            num_vectors,
-            entry_point,
-            max_level,
-            self.dimensions,
-            &self.hnsw.metric(),
-            self.precision,
-        );
-
-        // Write header page
-        let frame = bm
-            .pin_mut(&self.file_name, 0)
-            .map_err(|e| StorageError::Index(format!("Failed to pin header page: {e}")))?;
-        let data = &mut frame.data;
-        let write_len = header.len().min(data.len());
-        data[..write_len].copy_from_slice(&header[..write_len]);
-        frame.is_dirty = true;
-        bm.unpin(&self.file_name, 0);
-
-        // Serialize and write vector data pages
+        // Serialize and write vector data pages starting at page 1
         let data_page_start = 1;
         let mut page_idx = data_page_start;
         let mut offset = 0usize;
@@ -263,6 +286,93 @@ impl VectorIndexTable {
             page_idx += 1;
         }
 
+        // Serialize and write connection pages if graph topology is built
+        let (conn_page_start, conn_page_count, format_version) = if let Some((_ep, _max_level, ref conns)) = graph_topology {
+            let start_p = page_idx;
+            let mut conn_offset = 0usize;
+            let total_nodes = conns.len();
+
+            while conn_offset < total_nodes {
+                let frame = bm
+                    .pin_mut(&self.file_name, page_idx)
+                    .map_err(|e| StorageError::Index(format!("Failed to pin connection page {page_idx}: {e}")))?;
+                let page_data = &mut frame.data;
+                let capacity = page_data.len();
+                page_data.fill(0u8);
+                let mut pos = 0usize;
+                let mut written_this_page = 0usize;
+
+                while conn_offset < total_nodes {
+                    let (id, ref levels) = conns[conn_offset];
+                    let num_levels = levels.len();
+                    let mut entry_len = 8 + 2;
+                    for l in levels {
+                        entry_len += 2 + l.len() * 8;
+                    }
+
+                    if pos + entry_len > capacity {
+                        if written_this_page == 0 {
+                            bm.unpin(&self.file_name, page_idx);
+                            return Err(StorageError::Index(format!(
+                                "Connections for node {id} ({entry_len} bytes) do not fit in a {capacity} byte page"
+                            )));
+                        }
+                        break;
+                    }
+
+                    // Write node id
+                    page_data[pos..pos + 8].copy_from_slice(&(id as u64).to_le_bytes());
+                    pos += 8;
+                    // Write num_levels
+                    page_data[pos..pos + 2].copy_from_slice(&(num_levels as u16).to_le_bytes());
+                    pos += 2;
+                    // Write levels
+                    for l in levels {
+                        let conn_count = l.len() as u16;
+                        page_data[pos..pos + 2].copy_from_slice(&conn_count.to_le_bytes());
+                        pos += 2;
+                        for &neighbor_id in l {
+                            page_data[pos..pos + 8].copy_from_slice(&(neighbor_id as u64).to_le_bytes());
+                            pos += 8;
+                        }
+                    }
+
+                    written_this_page += 1;
+                    conn_offset += 1;
+                }
+
+                frame.is_dirty = true;
+                bm.unpin(&self.file_name, page_idx);
+                page_idx += 1;
+            }
+
+            (start_p, page_idx - start_p, FORMAT_VERSION_GRAPH_V2)
+        } else {
+            (0, 0, FORMAT_VERSION_LEGACY)
+        };
+
+        // Write header page with complete page counts and format version
+        let header = serialize_header(
+            num_vectors,
+            entry_point,
+            max_level,
+            self.dimensions,
+            &self.hnsw.metric(),
+            self.precision,
+            conn_page_start,
+            conn_page_count,
+            format_version,
+        );
+
+        let frame = bm
+            .pin_mut(&self.file_name, 0)
+            .map_err(|e| StorageError::Index(format!("Failed to pin header page: {e}")))?;
+        let data = &mut frame.data;
+        let write_len = header.len().min(data.len());
+        data[..write_len].copy_from_slice(&header[..write_len]);
+        frame.is_dirty = true;
+        bm.unpin(&self.file_name, 0);
+
         self.page_count = page_idx;
         self.dirty = false;
         Ok(())
@@ -271,10 +381,9 @@ impl VectorIndexTable {
     /// Load the HNSW index from BufferManager-backed pages.
     ///
     /// Reads the header page and exactly `num_vectors` entries from the data
-    /// pages, rebuilding the in-memory index. Zeroed page tails (which the
-    /// page padding leaves behind) are ignored instead of being reconstructed
-    /// as phantom empty vectors (P52.17). After loading, the index is fully
-    /// searchable.
+    /// pages, rebuilding or restoring the in-memory index. If the index was
+    /// saved with graph persistence (`FORMAT_VERSION_GRAPH_V2`), connection
+    /// pages are read and applied in O(1) time without rebuilding the graph.
     pub fn load(&mut self, bm: &mut BufferManager) -> Result<(), StorageError> {
         if !bm.is_file_registered(&self.file_name) {
             return Err(StorageError::Index(format!(
@@ -288,8 +397,17 @@ impl VectorIndexTable {
             .pin(&self.file_name, 0)
             .map_err(|e| StorageError::Index(format!("Failed to pin header page: {e}")))?;
         let header_data = &frame.data;
-        let (num_vectors, _entry_point, _max_level, dimensions, metric, precision) =
-            deserialize_header(header_data).ok_or(StorageError::Index("Invalid vector index header".into()))?;
+        let (
+            num_vectors,
+            entry_point,
+            max_level,
+            dimensions,
+            metric,
+            precision,
+            conn_page_start,
+            conn_page_count,
+            format_version,
+        ) = deserialize_header(header_data).ok_or(StorageError::Index("Invalid vector index header".into()))?;
         self.dimensions = dimensions;
         self.precision = precision;
 
@@ -310,8 +428,10 @@ impl VectorIndexTable {
         }
         bm.unpin(&self.file_name, 0);
 
-        // Rebuild the HNSW index
+        // Rebuild or restore the HNSW index
         let mut new_hnsw = HnswIndex::new(metric);
+        let has_graph_persistence =
+            format_version == FORMAT_VERSION_GRAPH_V2 && conn_page_count > 0 && entry_point.is_some();
 
         // Read data pages from page 1 onward until all vectors are loaded.
         let data_page_start = 1u64;
@@ -368,7 +488,11 @@ impl VectorIndexTable {
                 }
                 pos += vec_len;
 
-                new_hnsw.insert(vec_data, id);
+                if has_graph_persistence {
+                    new_hnsw.insert_flat(vec_data, id);
+                } else {
+                    new_hnsw.insert(vec_data, id);
+                }
                 loaded_this_page += 1;
             }
 
@@ -384,6 +508,101 @@ impl VectorIndexTable {
             if page_idx > 1024 * 1024 {
                 break;
             }
+        }
+
+        // Restore persisted graph connections if present
+        if has_graph_persistence {
+            let mut all_connections: Vec<(usize, Vec<Vec<usize>>)> = Vec::with_capacity(num_vectors as usize);
+            let mut conn_p = conn_page_start;
+            let end_p = conn_page_start + conn_page_count;
+
+            while conn_p < end_p {
+                let frame_result = bm.pin(&self.file_name, conn_p);
+                let frame = match frame_result {
+                    Ok(f) => f,
+                    Err(e) => {
+                        return Err(StorageError::Index(format!(
+                            "Failed to pin connection page {conn_p}: {e}"
+                        )));
+                    }
+                };
+                let page_data = &frame.data;
+                let capacity = page_data.len();
+                let mut pos = 0usize;
+
+                while pos + 10 <= capacity {
+                    let id = match page_data.get(pos..pos + 8).and_then(|s| s.try_into().ok()) {
+                        Some(b) => u64::from_le_bytes(b) as usize,
+                        None => break,
+                    };
+                    pos += 8;
+
+                    let num_levels = match page_data.get(pos..pos + 2).and_then(|s| s.try_into().ok()) {
+                        Some(b) => u16::from_le_bytes(b) as usize,
+                        None => break,
+                    };
+                    pos += 2;
+
+                    // A valid node always has at least level 0 (num_levels >= 1).
+                    // num_levels == 0 indicates zeroed padding tail of the page.
+                    if num_levels == 0 {
+                        break;
+                    }
+
+                    let mut levels = Vec::with_capacity(num_levels);
+                    let mut corrupt = false;
+                    for _ in 0..num_levels {
+                        if pos + 2 > capacity {
+                            corrupt = true;
+                            break;
+                        }
+                        let conn_count = match page_data.get(pos..pos + 2).and_then(|s| s.try_into().ok()) {
+                            Some(b) => u16::from_le_bytes(b) as usize,
+                            None => {
+                                corrupt = true;
+                                break;
+                            }
+                        };
+                        pos += 2;
+
+                        if pos + conn_count * 8 > capacity {
+                            corrupt = true;
+                            break;
+                        }
+
+                        let mut nids = Vec::with_capacity(conn_count);
+                        for _ in 0..conn_count {
+                            let nid = match page_data.get(pos..pos + 8).and_then(|s| s.try_into().ok()) {
+                                Some(b) => u64::from_le_bytes(b) as usize,
+                                None => {
+                                    corrupt = true;
+                                    break;
+                                }
+                            };
+                            pos += 8;
+                            nids.push(nid);
+                        }
+                        levels.push(nids);
+                    }
+
+                    if corrupt {
+                        break;
+                    }
+
+                    all_connections.push((id, levels));
+                    if all_connections.len() >= num_vectors as usize {
+                        break;
+                    }
+                }
+
+                bm.unpin(&self.file_name, conn_p);
+                conn_p += 1;
+            }
+
+            let ep = entry_point.unwrap_or(0);
+            new_hnsw
+                .import_graph_topology(ep, max_level, all_connections)
+                .map_err(|e| StorageError::Index(format!("Failed to import graph topology: {e}")))?;
         }
 
         self.hnsw = new_hnsw;
@@ -542,7 +761,17 @@ mod tests {
         );
         idx.register_file(&mut bm, dir.path());
 
-        let header = serialize_header(0, None, 0, 3, &DistanceMetric::Cosine, VectorPrecision::F64);
+        let header = serialize_header(
+            0,
+            None,
+            0,
+            3,
+            &DistanceMetric::Cosine,
+            VectorPrecision::F64,
+            0,
+            0,
+            FORMAT_VERSION_LEGACY,
+        );
         {
             let frame = bm.pin_mut(&idx.file_name, 0).unwrap();
             frame.data[..header.len()].copy_from_slice(&header);
