@@ -2,9 +2,9 @@
 
 This document describes how to cut a release of Akar (`akar-core/`).
 
-> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** All 31 publishable
-> crates are live on crates.io at `0.1.x` (bottom-up, dependency-ordered). Latest release
-> **v0.1.10** (2026-08-24); latest GitHub Releases carry prebuilt CLI binaries for
+> **crates.io publishing is active (since 2026-08-08, Sprint 18/P50).** All 33 publishable
+> crates are live on crates.io at `0.3.x` (bottom-up, dependency-ordered). Latest release
+> **v0.3.4** (2026-11-05); latest GitHub Releases carry prebuilt CLI binaries for
 > Linux/macOS/Windows.
 
 ---
@@ -21,7 +21,7 @@ Pre-release versions use suffixes like `-alpha.1`, `-beta.2`, `-rc.1`.
 
 The current version is tracked in `akar-core/Cargo.toml` under `[workspace.package] version`.
 
-> **Note (2026-08-24):** beberapa crate telah dikonversi dari `version.workspace = true` ke
+> **Note (2026-11-14):** beberapa crate telah dikonversi dari `version.workspace = true` ke
 > versi eksplisit sendiri (akar-function, akar-json, akar-llm, akar-ml, akar-neo4j,
 > akar-search, akar-dream, dst.) agar bisa di-bump independen. Untuk crate tersebut,
 > bump versi langsung di `Cargo.toml` masing-masing, bukan lewat `[workspace.package]`.
@@ -130,13 +130,13 @@ This runs tests and a release build to verify everything compiles, without creat
 Publishing to crates.io is **active** (Sprint 18/P50, 2026-08-08). The full process:
 
 1. All internal crates have `publish = true` (only `akar-c` remains `publish = false` —
-   FFI cdylib, local builds only).
+   FFI cdylib, local builds only). `akar-server` and `akar-dream` have been deleted.
 2. Publish internal crates bottom-up in dependency order (see graph below), paced by the
    crates.io rate limit.
-3. `akar-main`'s path dependencies ship with `version = "0.1.0"` so they resolve to the registry copies after publish.
-4. Publish `akar-main`, then `akar-server`, `akar-wasm`, `akar-cli`, `akar-migrate`.
+3. `akar-main`'s path dependencies ship with `version = "0.3.0"` so they resolve to the registry copies after publish.
+4. Publish `akar-main`, then `akar-cli`, `akar-wasm`, `akar-migrate`.
 
-### Dependency Publication Order
+### Dependency Publication Order (33 crates)
 
 ```
 akar-common
@@ -149,14 +149,18 @@ akar-common
               → akar-graph
                 → akar-main
                   → akar-cli
+                  → akar-wasm
+                  → akar-migrate
+                  → akar-c
 ```
 
-Extension crates (akar-json, akar-fts, etc.) can be published in any order after their core dependencies are available.
+Extension crates (akar-json, akar-markdown, akar-fts, akar-vector, akar-httpfs, akar-duckdb, akar-algo, akar-neo4j, akar-llm, akar-sqlite, akar-delta, akar-iceberg, akar-azure, akar-postgres, akar-unity-catalog, akar-ml) can be published in any order after their core dependencies are available.
+
+**SKIP_CRATES (non-publishable):** `akar-python` (PyPI, frozen at 0.2.5), `akar-fuzz` (internal), `akar-server` (deleted), `akar-dream` (deleted)
 
 ### Status
 
-As of 2026-08-24: **31/31 published** (bottom-up, dependency-ordered). Highest patch:
-`akar-storage` & `akar-main` @ **0.1.6**. Latest release tag **v0.1.10**.
+As of 2026-11-05: **33/33 published** (bottom-up, dependency-ordered). Latest release tag **v0.3.4**.
 Detail per-crate patch per rilis tercatat di [`CHANGELOG.md`](../CHANGELOG.md) — jangan
 duplikasi tabel versi di sini agar tidak drift.
 Rate limit: 1 crate/min after the initial burst (30).
