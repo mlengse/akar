@@ -2,9 +2,11 @@
 
 Python bindings for [Akar](https://github.com/mlengse/akar) — a pure Rust embedded graph database for AI agent memory.
 
-Provides a **drop-in replacement for KuzuDB** in the [Kairos](https://github.com/mlengse/kairos) project via a Cypher-to-SQL translation layer, or direct Akar API access.
+**⚠️ Status: `kairos/` archived — PyPI `akar` frozen at `0.2.5`**
 
-## Quick start
+The PyPI package `akar` is **no longer released**. Akar ships through crates.io (`akar-main` plus the other workspace crates) and through the CLI binaries attached to GitHub Releases. A wheel can still be built locally for testing (see below), but no new version is uploaded to PyPI. Python consumers stay on the last published version (`0.2.5`), which is not maintained.
+
+## Quick Start (local build)
 
 ```python
 import akar
@@ -33,9 +35,9 @@ rows = result.get_all()
 db.close()
 ```
 
-## API surface
+## API Surface
 
-### `Database(path: str)`
+### `Database(path: str, checkpoint_threshold: int = None)`
 
 - `close()` — release file lock, drop all connections
 - `__repr__()` — display path
@@ -56,22 +58,7 @@ db.close()
 - `__iter__()` / `__len__()` / `__bool__()` — iteration and checks
 - `close()` — drop result
 
-## Kairos compatibility shim
-
-For drop-in replacement of KuzuDB in Kairos, use the shim at `kairos/kuzu.py`:
-
-```python
-# In Kairos codebase:
-import kuzu  # transparently becomes `import akar`
-
-db = kuzu.Database("/path/to/db")
-conn = kuzu.Connection(db)
-```
-
-The shim registers a `sys.modules` alias for the `kuzu` package (`ladybug`
-alias was removed in 0.1.1 — Kairos imports akar directly).
-
-## Supported Cypher features
+## Supported Cypher Features
 
 - DDL: `CREATE NODE TABLE`, `CREATE REL TABLE`, `DROP TABLE`, `ALTER TABLE`, `CREATE/DROP INDEX`
 - DML: `MATCH`, `WHERE`, `RETURN`, `CREATE`, `SET`, `DELETE`, `MERGE` (ON CREATE/ON MATCH)
@@ -80,7 +67,7 @@ alias was removed in 0.1.1 — Kairos imports akar directly).
 - Parameters: `$param` interpolation (string, int, float, bool, list, dict, null)
 - Translation: Kuzu syntax auto-converted to Akar SQL (`IF NOT EXISTS`, `FLOAT[n]` → `FLOAT[]`, `INSTALL/LOAD EXTENSION` no-op, vector index calls)
 
-## Build from source
+## Build from Source
 
 This crate is a **standalone workspace** (not a member of `akar-core`'s workspace), so it does not affect the `test [akar-core]` gate or CI.
 
@@ -90,7 +77,7 @@ This crate is a **standalone workspace** (not a member of `akar-core`'s workspac
 - Python >= 3.9
 - [maturin](https://github.com/PyO3/maturin) >= 1.7
 
-### Development build
+### Development Build
 
 ```bash
 cd akar-core/akar-python
@@ -104,32 +91,23 @@ $env:PYO3_PYTHON = ".venv\Scripts\python.exe"   # Windows PowerShell
 .venv/Scripts/python -c "import akar; print(akar.__name__)"
 ```
 
-### Release build (wheel)
+### Release Build (wheel)
 
 ```bash
 .venv/Scripts/maturin build --release
-# Output: target/wheels/akar-0.1.0-cp39-abi3-<platform>.whl
+# Output: target/wheels/akar-0.2.5-cp39-abi3-<platform>.whl
 ```
 
-### Source distribution
+### Source Distribution
 
 ```bash
 .venv/Scripts/maturin sdist
-# Output: target/wheels/akar-0.1.0.tar.gz
+# Output: target/wheels/akar-0.2.5.tar.gz
 ```
-
-### Publishing to PyPI — frozen
-
-The PyPI package `akar` is **no longer released**. Feature `018-release-artifact-alignment`
-removed it from the release scope: Akar ships through crates.io (`akar-main` plus the other
-workspace crates) and through the CLI binaries attached to GitHub Releases. A wheel can still
-be built locally for testing (see above), but no new version is uploaded.
-
-Python consumers stay on the last published version, which is not maintained.
 
 ## Tests
 
-### Rust unit tests (cargo)
+### Rust Unit Tests (cargo)
 
 ```bash
 cd akar-core/akar-python
@@ -138,7 +116,7 @@ cargo test --lib
 
 Rust unit tests covering: translation layer, parameter interpolation, value conversion, schema bootstrap, vector index / kNN, community detection (Louvain), lock management, connection lifecycle.
 
-### Python compatibility harness (pytest)
+### Python Compatibility Harness (pytest)
 
 ```bash
 cd akar-core/akar-python
@@ -147,7 +125,7 @@ cd akar-core/akar-python
 
 53 tests validating drop-in replacement against real Kairos `KuzuDBStore` / `KuzuDBDreamBackend` methods (schema bootstrap, store, search, connections, export/repair, CHECKPOINT).
 
-## Project structure
+## Project Structure
 
 ```
 akar-core/akar-python/

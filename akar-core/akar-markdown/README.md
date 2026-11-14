@@ -20,8 +20,8 @@ reader implements a documented YAML subset and the link scanner is line oriented
 | `WikiNote` | `id`, `path`, `frontmatter`, `body`, `links` |
 | `WikiRelation` | `from`, `to` (raw link target), `label` |
 | `WikiLink` | `target`, `label`, `anchor`, `line` (1-based, whole file) |
-| `FrontMatter` | `get`, `title`, `tags`, `aliases`, `is_empty`, `len`, `iter` |
-| `FrontMatterValue` | `Scalar(String)` or `List(Vec<String>)` |
+| `FrontMatter` | `get`, `title`, `tags`, `aliases`, `is_empty`, `len`, `iter`, `to_json()` |
+| `FrontMatterValue` | `Scalar(String)`, `List(Vec<FrontMatterValue>)`, `Map(BTreeMap<String, FrontMatterValue>)`, `Bool(bool)`, `Number(f64)`, `Null` |
 | `extract_wikilinks(body)` | Scan a body for links, skipping fenced code blocks |
 | `MarkdownError` | `Io`, `NotADirectory`, `NotUnderRoot` |
 | `MarkdownExtension` | Registers the table function with the `MARKDOWN` extension |
@@ -43,18 +43,29 @@ The path argument is the wiki root folder. Akar's Cypher grammar has no `YIELD`
 clause, so the columns are addressed by the field names declared on the produced
 chunk:
 
-| column | type | nullable | contents |
-|--------|------|----------|----------|
-| `node` | STRING | no | a note id |
-| `rel`  | STRING | yes | the raw `[[wikilink]]` target on a link row, `NULL` on the note's own row |
+| column    | type   | nullable | contents |
+|-----------|--------|----------|----------|
+| `node`    | STRING | no       | a note id |
+| `rel`     | STRING | yes      | the raw `[[wikilink]]` target on a link row, `NULL` on the note's own row |
+| `metadata`| STRING | yes      | JSON frontmatter on the note's own row, `NULL` on link rows |
 
 Rows are emitted note by note, in graph order (ids ascending): the note's own
-row `(id, NULL)` first, then one `(id, target)` row per link in the body, in
+row `(id, NULL, metadata_json)` first, then one `(id, target, NULL)` row per link in the body, in
 document order. Targets are emitted exactly as written, so repeated links
 produce repeated rows — use `WikiGraph::relations()` for a deduplicated edge
 list. The wiki is re-read on every call.
 
 Enable with the `markdown-extension` feature of `akar-main`.
+
+## `FrontMatter::to_json()`
+
+```rust
+let fm = FrontMatter::parse(note_text)?;
+let json: serde_json::Value = fm.to_json();
+```
+
+Converts the entire frontmatter to a `serde_json::Value` (Object with all entries).
+Useful for storing frontmatter as a single JSON column or serializing to other formats.
 
 ## Supported frontmatter subset
 

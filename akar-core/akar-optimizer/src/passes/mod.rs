@@ -5,8 +5,12 @@
 //!
 //! ## Module structure
 //!
-//! - `flat/` — 14 flat passes that operate on `&[LogicalOperator]`
+//! - `flat/` — 19 flat passes that operate on `&[LogicalOperator]`
 //! - `tree/` — 7 tree passes that operate on the operator tree in-place
+//!
+//! Total: 26 passes (19 flat + 7 tree).
+//! 3 passes are disabled (not registered by default): CorrelatedSubqueryUnnesting, AggKeyDependency, SortElision (tree).
+//! AggregateFusion is a NO-OP (stub returns operators unchanged; merging chained aggregates is unsound).
 
 pub mod flat;
 pub mod tree;
