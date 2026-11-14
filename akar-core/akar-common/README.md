@@ -14,4 +14,4 @@ execution.
 **Infrastructure:** Memory manager (tracking), task system (rayon thread pool), file
 system abstraction, binary serialization for Value/LogicalType.
 
-**Tests:** 36
+**Tests:** 82

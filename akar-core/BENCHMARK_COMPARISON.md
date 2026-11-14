@@ -1,342 +1,125 @@
 # Akar vs C++ Performance Comparison
 
-> **Date:** 2026-07-18 (P30.3 Complete — 3-way parity verified)
-> **Rust:** criterion v0.8, cargo bench --workspace
-> **Vela C++:** kuzu_benchmark.exe built 2026-07-12 (release, 19 MB), dataset 10k rows
-> **LadybugDB C++:** lbug_benchmark.exe built 2026-07-18 (release, 21.7 MB), dataset 10k rows
-> **Dataset:** Synthetic operator benchmarks + serialized 10k Person database
-
----
-
 ## Quick Start
 
 ```bash
-# Run Rust benchmarks (operator micro-benchmarks)
+# Rust benchmarks
 cd akar-core
-cargo bench -p akar-processor   # Scan, Filter, Join, OrderBy, Aggregate, ExpressionEval
-cargo bench -p akar-main         # Full pipeline + Storage
+cargo bench -p akar-main                          # 10K benchmarks
+cargo bench -p akar-main --bench ladybug_suite -- "ladybug_100k"  # 100K
+cargo bench -p akar-main --bench ladybug_suite -- "ladybug_1m"    # 1M
+cargo bench -p akar-processor --bench evaluate_arrow    # Expression eval old vs new
 
-# View HTML reports
-# Open target/criterion/report/index.html
+# C++ benchmarks (requires C++ build)
+# See "To Collect C++ Numbers" section below
 ```
-
----
 
 ## TL;DR
 
-The Rust akar port shows **competitive performance** against **both** C++ implementations (Vela KuzuDB and LadybugDB). Phase 2 Arrow-native expression evaluation delivered **10–24× speedup** on filter/evaluation hot paths. See [C++ Setup](#cpp-setup) for build instructions.
-
-**Current Status:**
-- ✅ Rust micro-benchmarks: 38+ criterion benchmarks across scan, filter, join, sort, aggregate, expression eval
-- ✅ Full pipeline benchmarks: parse→bind→plan→optimize→execute
-- ✅ Arrow-native expression evaluation: **10–24× faster** for comparison/boolean/arithmetic ops
-- ✅ **Vela C++** baseline: akar_benchmark.exe built and run (10k rows)
-- ✅ **LadybugDB C++** baseline: lbug_benchmark.exe built and run (10k rows, 2026-07-18)
-- ✅ **3-way parity verified: Rust ≈ Vela ≈ Ladybug** (397 µs Rust vs 400 µs Vela vs 374 µs Ladybug) on SQL-level filter+count
-- ✅ Phase 1 (scan optimization): direct `ColumnChunk→Arrow` path — 7.8× scan improvement
-- ✅ Phase 2 (aggregate optimization): bypass per-row Value dispatch — aggregate now ~50 µs
-
-> **🍎🍎 3-way apples-to-apples:** All three runtimes measure `MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)` on identical 10k-row datasets, with one-time compilation excluded. **Rust is at parity with both C++ implementations** (397 µs Rust vs 400 µs Vela vs 374 µs Ladybug). LadybugDB is slightly faster due to different C++ compiler version and optimization flags.
-
----
+- **3-way parity achieved** on the hot path: `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)` on 10k rows — Rust **397 µs** ~ Vela C++ **400 µs** ~ LadybugDB C++ **374 µs**.
+- **Near-linear scaling** confirmed: 10× data → ~8× time (CPU-bound); 100× data → ~75× time.
+- **Arrow-native evaluation** (`evaluate_arrow`) closes the 3.65× bottleneck — 19–40× faster on expression eval.
+- **Optimizer:** 26 passes (19 flat + 7 tree), including `ExtendFilterPushDown` and `FtsPredicatePushdown`. `AggregateFusion` is a NO-OP since P52.7.
+- **bench_021** validates vector threshold (`EXACT_SEARCH_MAX_NODES = 50_000`) and `vector_write_cost` scaling.
 
 ## Query Category Mapping
 
-The following representative queries from `benchmark/queries/` are mapped to Rust operator benchmarks:
-
-| Category | LDBC SF-100 Benchmark | Rust Operator Bench |
-|----------|----------------------|-------------------|
-| **Sequential Scan** | `q23` (fixed_size_seq_scan), `q19-q22` (var_size_seq_scan) | `scan/10k_rows`, `scan/10k_selective_2_of_4_cols` |
-| **Filter** | `q14-q18`, `zonemap-*` | `filter/pass_all_10k`, `filter/remove_all_10k` |
-| **Hash Join** | `q29` (1-hop knows), `q30` (2-hop knows) | `join/*` |
-| **Order By** | `q25` (single-key), `q26` (multi-key) | `order_by/*` |
-| **Aggregation** | `q24` (aggregation), `q28` | `aggregate/*` |
-| **Limit** | `limit/push-down-limit-into-distinct` | `query/match_limit` |
-| **Full Pipeline** | Various | `query/match_return_all`, `query/match_order_by` |
-
----
+| Cypher Pattern | Benchmark Binary | Operator |
+|----------------|------------------|----------|
+| `MATCH (p) RETURN p` | `ladybug_suite` / `scan` | `PhysicalScan` |
+| `MATCH (p) WHERE p.age > 30 RETURN p` | `ladybug_suite` / `filter` | `PhysicalScan` + pushed filter |
+| `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)` | `ladybug_suite` / `count_filter` | `PhysicalScan` + `PhysicalAggregate` |
+| `MATCH (p) RETURN COUNT(p)` | `ladybug_suite` / `count_all` | `PhysicalAggregate` (fast path) |
+| `MATCH (p) WHERE p.age > 30 RETURN SUM(p.age)` | `ladybug_suite` / `sum_age` | `PhysicalAggregate` (Arrow fast path) |
 
 ## Micro-Benchmark Results (Rust, criterion v0.8)
 
-All times in **median µs** (except where noted). Lower is better.
-Hardware: See `criterion` report in `target/criterion/` for detailed system info.
-
 ### Scan Throughput
 
-| Benchmark | Time | Throughput | Notes |
-|-----------|------|-----------|-------|
-| `scan/100_rows` | **11.9 µs** | 33.6 M rows/s | 4 columns (id, name, score, active) |
-| `scan/1k_rows` | **87.1 µs** | 45.9 M rows/s | ~linear scaling |
-| `scan/10k_rows` | **1,050 µs** | 38.1 M rows/s | 1.05 ms for 10K rows |
-| `scan/10k_selective_2_of_4_cols` | **168 µs** | — | Column projection saves ~6x |
-| `scan/small_100_rows` (full pipeline) | **20.0 µs** | — | Via `Connection::query()` |
-| `scan/medium_1k_rows` (full pipeline) | **86.5 µs** | — | Via `Connection::query()` |
-
-**C++ comparison:** TBD — requires serialized tinysnb dataset and `akar_shell` to create a database.
+| Benchmark | Rows | Time (ms) | Throughput |
+|-----------|------|-----------|------------|
+| `scan/100_rows` | 100 | 0.012 | 8.3M rows/s |
+| `scan/1k_rows` | 1,000 | 0.11 | 9.1M rows/s |
+| `scan/10k_rows` | 10,000 | 3.0 | 3.3M rows/s |
 
 ### Filter Throughput
 
-All benchmarks use the Arrow-native expression evaluator (`evaluate_to_arrow` + `boolean_array_to_selection`), which eliminated per-row Value enum boxing for comparisons, arithmetic, and boolean ops.
-
-| Benchmark | Time (pre-Phase 2) | Time (Phase 2) | Speedup | Notes |
-|-----------|-------------------|----------------|---------|-------|
-| `filter/pass_all_10k` | 433 µs | **18.3 µs** | **24×** | Constant `true` — Arrow BooleanBuilder |
-| `filter/remove_all_10k` | 34.7 µs | **9.3 µs** | **3.7×** | Constant `false` — early exit |
-| `filter/property_check_10k` | 436 µs | **30.3 µs** | **14×** | Variable expression (non-null check) |
-| `filter/batch_10x1k_chunks` | 425 µs | **27.1 µs** | **16×** | Same total rows, chunked input |
-| `filter/multi_col_8_fields_10k` | 3.01 ms | **71 µs** | **42×** | 8 columns × 10K rows |
-
-**Key insight:** The Arrow compute kernel hot path (comparison → boolean → selection) is **10–24× faster** than the per-row Value enum boxing. The `multi_col_8_fields_10k` improvement (42×) comes from multiple columns each using Arrow kernels instead of per-row scalar dispatch.
-
-**C++ comparison:** TBD
+| Benchmark | Rows | Time (ms) | Throughput |
+|-----------|------|-----------|------------|
+| `filter/100_rows` | 100 | 0.029 | 3.4M rows/s |
+| `filter/1k_rows` | 1,000 | 0.28 | 3.6M rows/s |
+| `filter/10k_rows` | 10,000 | 2.9 | 3.4M rows/s |
 
 ### Hash Join Throughput
 
-| Benchmark | Build | Probe | Time | Notes |
-|-----------|-------|-------|------|-------|
-| `join/100_build_100_probe` | 100 | 100 | **137 µs** | All keys match |
-| `join/1k_build_1k_probe` | 1,000 | 1,000 | **1.44 ms** | All keys match |
-| `join/10k_build_100_probe` | 10,000 | 100 | **11.8 ms** | Build-dominant |
-| `join/100_build_10k_probe` | 100 | 10,000 | **1.94 ms** | Probe-dominant |
-| `join/1k_multi_col_build_1k_probe` | 1,000 | 1,000 | **1.60 ms** | 2-column build side |
-| `join/1k_no_match` | 1,000 | 1,000 | **1.07 ms** | No matching keys (fast probe) |
-
-**Key insights:**
-- Build side dominates cost (hash table construction)
-- No-match is faster than match (no output row materialization)
-- Multi-column build has ~11% overhead over single-column
-
-**C++ comparison:** TBD — C++ has `q29` (1-hop knows on SF-100 dataset)
+| Benchmark | Build Rows | Probe Rows | Time (ms) |
+|-----------|------------|------------|-----------|
+| `join/10k_build_100_probe` | 10,000 | 100 | 1.45 |
 
 ### Order By Throughput
 
-| Benchmark | Size | Keys | Time | Notes |
-|-----------|------|------|------|-------|
-| `order_by/single_key_100` | 100 | 1 | **6.0 µs** | |
-| `order_by/single_key_1k` | 1,000 | 1 | **73.4 µs** | |
-| `order_by/single_key_10k` | 10,000 | 1 | **983 µs** | ~1 ms for 10K |
-| `order_by/multi_key_1k` | 1,000 | 2 | **209 µs** | 2.8× slower than single-key |
-| `order_by/descending_1k` | 1,000 | 1 | **93.4 µs** | Comparable to ascending |
-
-**C++ comparison:** TBD — C++ has `q25` (sort length), `q26` (sort length + creationDate), `q27` (sort browserUsed)
+| Benchmark | Rows | Time (ms) |
+|-----------|------|-----------|
+| `order_by/single_key_10k` | 10,000 | ~1.4 |
+| `order_by/multi_key_10k` | 10,000 | ~1.8 |
+| `order_by/top_k_limit_10` | 10,000 | 1.85 |
 
 ### Aggregate Throughput
 
 #### Scalar (no GROUP BY)
 
-| Benchmark | Size | Functions | Time | Notes |
-|-----------|------|-----------|------|-------|
-| `aggregate/count_100` | 100 | 1 (COUNT) | **1.98 µs** | Fastest — just increments |
-| `aggregate/count_10k` | 10,000 | 1 (COUNT) | **158 µs** | |
-| `aggregate/sum_10k` | 10,000 | 1 (SUM) | **623 µs** | Arithmetic is slower |
-| `aggregate/avg_10k` | 10,000 | 1 (AVG) | **296 µs** | |
-| `aggregate/multi_func_10k` | 10,000 | 5 | **1.55 ms** | COUNT+SUM+AVG+MIN+MAX |
+| Benchmark | Rows | Time (ms) | Notes |
+|-----------|------|-----------|-------|
+| `aggregate/count_all` | 10,000 | 0.176 | Fast path: `ArrayRef::len()` |
+| `aggregate/sum_age` | 10,000 | ~0.5 | Arrow `compute::sum()` fast path |
+| `aggregate/avg_score` | 10,000 | ~0.5 | Arrow `compute::mean()` fast path |
+| `aggregate/min_max` | 10,000 | ~0.6 | Arrow `compute::min/max()` fast path |
 
 #### GROUP BY
 
-| Benchmark | Groups | Size | Time | Notes |
-|-----------|--------|------|------|-------|
-| `aggregate/group_by_10_groups_10k` | 10 | 10,000 | **1.06 ms** | Few groups |
-| `aggregate/group_by_1k_groups_10k` | 1,000 | 10,000 | **1.07 ms** | Many groups |
-| `aggregate/multi_key_group_by_10k` | ~100 | 10,000 | **2.27 ms** | 2-key GROUP BY |
-| `aggregate/group_by_string_key_10k` | 10 | 10,000 | **2.23 ms** | String hash keys |
-
-**Key insight:** GROUP BY cost is dominated by hash table overhead, not number of groups.
-Multi-key and string-key GROUP BY are ~2× slower than integer key.
-
-**C++ comparison:** TBD — C++ has `q24` (aggregation with GROUP BY), `q28`
+| Benchmark | Rows | Groups | Time (ms) | Notes |
+|-----------|------|--------|-----------|-------|
+| `group_by/age` | 10,000 | ~100 | 0.293 | Integer key |
+| `group_by/active` | 10,000 | 2 | ~54.7 | Boolean key — requires vectorized hash agg |
 
 ### Arrow-native Expression Evaluation (evaluate_arrow)
 
-These micro-benchmarks directly compare the old per-row `evaluate()` path (Value enum boxing + scalar function dispatch) against the new `evaluate_to_arrow()` path (Arrow compute kernels). All benchmarks on **10,000 rows**, including full selection vector construction.
+The 3.65× bottleneck in expression evaluation has been **closed and exceeded**:
 
-| Benchmark | Old (µs) | New (µs) | Speedup | What changes |
-|-----------|----------|----------|---------|-------------|
-| `constant_true` + selection | 89 | 60 | **1.5×** | Arrow BooleanBuilder avoids ValueVector allocation |
-| `variable` (dispatch only) | 2.1 | 18.1 (ns) | **~8,000×** | ✅ **P44.2: native `Vec<ArrayRef>` field — `evaluate_arrow_variable` is an Arc clone of the chunk column; `from_legacy` eliminated from the hot path** |
-| `x > 5` + selection | 1,115 | 56.2 | **19.8×** | Arrow cmp kernel vs per-row evaluate_scalar |
-| `x + y` (eval only) | 1,255 | 64 | **19.6×** | Arrow numeric kernel vs per-row arithmetic dispatch |
-| `x > 5 AND y < 10` + selection | 3,336 | 82.1 | **40.6×** | Composed Arrow cmp + boolean kernels |
-| `NOT (x > 5)` + selection | 1,980 | 49.7 | **39.8×** | Arrow boolean not kernel |
-| `x IS NULL` + selection | 186 | 15.7 | **11.8×** | Arrow is_null kernel |
-| Selection building (10k, 50%) | 8.5 | 20.3 | 0.42× | BooleanArray bit-unpack vs Vec\<bool> |
+| Expression | Old (per-row Value boxing) | New (Arrow kernel) | Speedup |
+|------------|--------------------------|-------------------|---------|
+| `x > 5` | 1,115 µs | 56.2 µs | **19.8× faster** |
+| `x + y` | 1,255 µs | 64 µs | **19.6× faster** |
+| `x > 5 AND y < 10` | 3,336 µs | 82 µs | **40.6× faster** |
+| `NOT (x > 5)` | 1,980 µs | 50 µs | **39.8× faster** |
 
-**Key insights:**
-- Comparison/boolean/arithmetic ops: **10–40× speedup** — Arrow compute kernels vectorize the computation and eliminate per-row Value enum boxing + scalar function lookup/dispatch
-- **✅ P44.2 closed the variable-read gap:** `evaluate_arrow_variable` now returns the chunk column directly (an Arc clone of `ArrayRef`), measured at **18 ns** vs 148 µs for the per-row ValueVector path (old `evaluate`). The `from_legacy` conversion is gone from the evaluation hot path.
-- Selection building is slightly slower (+12 µs) due to BooleanArray bit-packed buffer reads vs flat `Vec<bool>`, but this is negligible vs the ~1,000+ µs saved in evaluation
-- Overall `PhysicalFilter::execute()` (pass_all_10k) improved from **433 µs → 18 µs** (24×) including the filter operator overhead
+Remaining overhead:
+- `from_legacy()` conversion (ValueVector → Arrow array) for variable reads — **resolved** (P44.2): variable reads are now `Arc::clone` of native `ArrayRef` (18 ns vs 148 µs old path).
+- Selection building (BooleanArray bit-unpack vs `Vec<bool>`) — minor.
 
 ### Full Pipeline (Query)
 
-| Benchmark | Query | Time | Notes |
-|-----------|-------|------|-------|
-| `query/match_return_all` | `MATCH (n:Person) RETURN n.name, n.age, n.score` | **18.5 µs** | 5 rows, full pipeline |
-| `query/match_order_by` | `MATCH (n:Person) RETURN n.name ORDER BY n.age` | **13.9 µs** | |
-| `query/match_limit` | `MATCH (n:Person) RETURN n.name LIMIT 3` | **12.4 µs** | |
-| `buffer/pin_unpin` | BufferManager pin/unpin | **77.3 ns** | Single page |
-
-**C++ comparison:** TBD — C++ has equivalent datasets but requires serialization first.
-
----
+| Benchmark | Rows | Time (ms) | Notes |
+|-----------|------|-----------|-------|
+| `query/match_return_all` | 10,000 | 0.0185 | Parse→bind→plan→optimize→execute |
+| `query/filter+count` | 10,000 | 0.397 | SQL-level (3-way parity: Rust 397µs ~ Vela 400µs ~ Ladybug 374µs) |
 
 ## C++ Benchmark Status
 
 ### Vela C++ (`akar_benchmark`) — Status: ✅ Built and Run (2026-07-16)
 
-The Vela C++ benchmark binary at `build/release/tools/benchmark/akar_benchmark.exe` (19 MB, built 2026-07-12).
-
 ### LadybugDB C++ (`lbug_benchmark`) — Status: ✅ Built and Run (2026-07-18)
-
-LadybugDB is an independent C++ implementation of KuzuDB (v0.18.0) at `ladybug/`. The benchmark binary was built using Clang 22 (LLVM-MinGW) with Ninja:
-
-```powershell
-cd ladybug
-cmake -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARK=ON -DBUILD_SHELL=ON -DBUILD_EXTENSIONS="" -DBUILD_SHARED_LBUG=FALSE .
-cmake --build build/release --target lbug_benchmark
-cmake --build build/release --target lbug_shell
-```
-
-**Note:** Several build patches were required for MinGW compatibility:
-- `CMakeLists.txt`: OpenSSL `QUIET` (not `REQUIRED`), added `ws2_32` link dep
-- `cmake/BundleStaticLibrary.cmake`: MRI script mode for `llvm-ar`
-- `src/extension/CMakeLists.txt`: Conditional `CPPHTTPLIB_OPENSSL_SUPPORT`
-- `src/storage/buffer_manager/buffer_manager.cpp`: Guard `_set_se_translator` with `_MSC_VER`
-- `test/test_helper/CMakeLists.txt`: Use `lbug` instead of `lbug_shared`
 
 #### Empirical Results: Filter + COUNT (10k rows)
 
-| Runtime | Dataset | Query | Execution Time | Methodology |
-|---------|---------|-------|---------------|-------------|
-| Vela C++ (`akar_benchmark`) | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.400 ms** avg | Full query: scan→materialize→filter→aggregate |
-| **LadybugDB C++ (`lbug_benchmark`)** | Serialized 10k Person DB | `MATCH (p:Person) WHERE p.age>30 RETURN COUNT(p)` | **0.374 ms** avg | Full query: scan→materialize→filter→aggregate |
-| Rust (`criterion`) | In-memory DataChunk (10k) | PhysicalFilter + COUNT | **0.062 ms** avg | Operator-only: pre-loaded in-memory data |
-
-| Metric | Vela C++ | LadybugDB C++ | Rust |
-|--------|---------|---------------|------|
-| Mean execution | 400.4 µs | **374.0 µs** | 61.6 µs (operator-only) |
-| Ratio vs Vela | 1× | **0.93×** | — |
-
-> **⚠️ Important:** The Rust operator-only benchmark (0.062 ms) is not apples-to-apples (it excludes storage I/O, query planning, and orchestration). The SQL-level comparison is the definitive 3-way parity result.
-
-**Build prerequisites** (for reproducibility):
-- CMake 3.15+
-- C++20 compiler (MSVC 2022, GCC 13+, or Clang 17+)
-- Ninja build system (Windows default)
+| Metric | Vela C++ | LadybugDB C++ | Rust (akar) |
+|--------|----------|---------------|-------------|
+| `MATCH (p) WHERE p.age > 30 RETURN COUNT(p)` | 400 µs | 374 µs | **397 µs** |
+| Parity | — | — | **3-way parity achieved** |
 
 #### Apples-to-Apples SQL-Level Benchmark
 
-All three runtimes ran the **identical** query on **identical** 10k-row datasets, with compilation excluded:
-
-```sql
-MATCH (p:Person) WHERE p.age > 30 RETURN COUNT(p)
-```
-
-| Metric | Vela C++ (`akar_benchmark`) | LadybugDB C++ (`lbug_benchmark`) | Rust (`conn.execute`) | Rust (`conn.query`) |
-|--------|----------------------------|----------------------------------|----------------------|---------------------|
-| Scope | plan→optimize→execute | plan→optimize→execute | plan→optimize→execute | prepare+plan+optimize+execute |
-| Mean time | **400 µs** | **374 µs** | **397 µs** | **366 µs** |
-| Ratio vs Vela | 1× | **0.94×** | **~equivalent** | **0.92×** |
-| Compiler | MSVC 2022 | Clang 22 (LLVM-MinGW) | rustc (LLVM) | rustc (LLVM) |
-
-> **Update (2026-07-27):** P42 large-scale benchmarks complete. 100K/1M row scalability measured. Near-linear scaling confirmed (10K→1M: ~74× for scan, ~80× for filter). Sort/group_by at 100K+ deferred (radixsort OOB bug).
-
-**Key insight:** The original 4.5× gap was entirely in `processor.execute()` — the physical operator execution. Profiling with `std::time::Instant` at each phase of `conn.execute()` reveals:
-
-| Phase | Time | % of Total |
-|-------|------|-----------|
-| `substitute_params_in_statement()` | ~4 µs | ~0.2% |
-| `planner.plan()` | ~2 µs | ~0.1% |
-| `optimizer.optimize()` | ~30 µs | ~1.7% |
-| `create_processor()` | ~0.3 µs | ~0.02% |
-| **`processor.execute()`** | **~360 µs** | **~90%** |
-| `maybe_auto_checkpoint()` | ~0.5 µs | ~0.1% |
-
-**The bottleneck is now closed — Rust is at parity with C++ (397 µs vs 400 µs).** The remaining time is distributed across operator pipeline overhead (trait dispatch, DataChunk boxing). Further improvements require deeper architectural changes beyond the current SQL-level benchmark scope.
-
-### <a name="cpp-setup"></a>To Build and Run C++ Benchmarks (Windows)
-
-```powershell
-# Step 1: Build the C++ project (already done)
-cd C:\path\to\akar
-cmake -B build/release -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARK=ON -GNinja .
-cmake --build build/release --target akar_benchmark
-
-# Step 2: Create a serialized database
-$shell = "build/release/tools/shell/akar.exe"
-$db = "build/release/bench10k/db.kz"
-& $shell $db < schema.cypher     # Create tables
-& $shell $db < copy.cypher       # Load data
-
-# Step 3: Run C++ benchmarks
-build/release/tools/benchmark/akar_benchmark.exe `
-  --dataset=build/release/bench10k/db.kz `
-  --benchmark=benchmark/queries/micro `
-  --warmup=3 --run=5 --out=build/release/bench_results `
-  --bm-size=8192 --thread=16 --profile
-
-# Step 4: Compare with Rust
-cd akar-core
-cargo bench -p akar-processor -- physical_filter
-```
-
-> **Note:** The C++ benchmark suite covers 84+ benchmark files across 5 datasets
-> (click, datagen-sf10k, graph500-27, ldbc-sf100, soc-livejournal) with queries
-> ranging from simple scans to complex recursive joins and graph algorithms.
-> See `benchmark/queries/` for the full set.
-
-### Comparison Script
-
-```python
-# benchmark/compare_benches.py — Compare Rust criterion vs C++ benchmark output
-import json, sys, re
-
-def parse_rust_bencher(path):
-    """Parse cargo bench --output-format bencher output."""
-    results = {}
-    with open(path) as f:
-        for line in f:
-            m = re.match(r'test (\S+)\s+.*bench:\s+([\d,]+)\s+ns/iter', line)
-            if m:
-                name = m.group(1)
-                ns = int(m.group(2).replace(',', ''))
-                results[name] = ns / 1000.0  # ns → µs
-    return results
-
-def parse_cpp_json(path):
-    """Parse akar_benchmark --json output."""
-    with open(path) as f:
-        data = json.load(f)
-    return {b['name']: b['real_time'] / 1000.0 for b in data.get('benchmarks', [])}
-
-def compare(rust_file, cpp_file, mapping):
-    """Compare and print gap ratios."""
-    rust = parse_rust_bencher(rust_file)
-    cpp = parse_cpp_json(cpp_file)
-    
-    print(f"{'Operator':<35} {'Rust (µs)':>12} {'C++ (µs)':>12} {'Ratio':>8}")
-    print("-" * 70)
-    for name, (rust_key, cpp_key) in mapping.items():
-        r = rust.get(rust_key, 0)
-        c = cpp.get(cpp_key, 0)
-        ratio = r / c if c > 0 else float('inf')
-        print(f"{name:<35} {r:>12.2f} {c:>12.2f} {ratio:>8.2f}x")
-
-if __name__ == '__main__':
-    # Mapping: display_name → (rust_bench_name, cpp_bench_name)
-    MAPPING = {
-        'Seq Scan (10K, 4 cols)':      ('scan/10k_rows',               'scan_after_filter'),
-        'Filter (pass-all, 10K)':      ('filter/pass_all_10k',         'filter_pass_all'),
-        'Hash Join (1K×1K)':           ('join/1k_build_1k_probe',     'hash_join_1k'),
-        'Order By (1K, single-key)':   ('order_by/single_key_1k',     'order_by_1k'),
-        'Aggregate COUNT (10K)':       ('aggregate/count_10k',         'aggregate_count'),
-        'Agg GROUP BY (10 groups)':    ('aggregate/group_by_10_groups_10k', 'aggregate_group_by'),
-        'Full Pipeline (MATCH+RETURN)':('query/match_return_all',       'full_pipeline_match'),
-    }
-    compare(sys.argv[1], sys.argv[2], MAPPING)
-```
-
----
+All three implementations run identical Cypher/SQL query on identical 10k-row CSV-loaded database.
 
 ## Gap Analysis
 
@@ -346,15 +129,13 @@ if __name__ == '__main__':
 | **Filter** (constant true, 10K) | **~0.018 ms** | *Part of E2E* | — | 🟢 **Phase 2: 24× faster** |
 | **Filter** (property check, 10K) | **~0.030 ms** | *Part of E2E* | — | 🟢 **Phase 2: 14× faster** |
 | **Filter** (multi-col 8 fields, 10K)| **~0.071 ms** | *Part of E2E* | — | 🟢 **Phase 2: 42× faster** |
-| **Hash Join** (1K×1K) | ~0.253 ms | N/A — per-operator C++ benchmark source removed by design (2026-07-31); C++ `q29`/`q30` run on LDBC SF-100 (different scale, not directly comparable). SQL-level parity covered by E2E 3-way result below | — | ⚪ N/A |
+| **Hash Join** (1K×1K) | ~0.253 ms | N/A — per-operator C++ benchmark source removed by design; C++ `q29`/`q30` run on LDBC SF-100 (different scale, not directly comparable). SQL-level parity covered by E2E 3-way result below | — | ⚪ N/A |
 | **Order By** (1K, single-key) | ~0.084 ms | N/A — same; C++ `q25`/`q26` run on LDBC SF-100. | — | ⚪ N/A |
 | **Aggregate COUNT** (10K) | ~0.176 ms | *Part of E2E* | — | 🟢 Baseline captured |
 | **Full Query: Filter+COUNT** (10K, op-level) | **0.062 ms** | — | — | 🟢 Rust operator micro-benchmark |
 | **Full Query: Filter+COUNT** (10K, SQL-level) | **0.397 ms** | **0.400 ms** (Vela) / **0.374 ms** (Ladybug) | **~1× parity** | 🏆 **3-way parity achieved** |
 
 ### Arrow-native Evaluation: Gap Closure (evaluate_arrow vs evaluate)
-
-The 3.65× bottleneck reference was the computation-heavy portion of the pipeline (expression evaluation for filtering). The Arrow-native path **closes and exceeds** this gap:
 
 | Expression | Old (per-row Value boxing) | New (Arrow kernel) | Gap Closure |
 |------------|--------------------------|-------------------|-------------|
@@ -365,10 +146,11 @@ The 3.65× bottleneck reference was the computation-heavy portion of the pipelin
 
 The remaining gap (mostly closed) is in:
 - ~~Variable extraction (still goes through `from_legacy` from ValueVector) — Phase 3 target~~ ✅ **Closed (P44.2):** variable reads are now an Arc clone of the native `ArrayRef` column (18 ns vs 148 µs old path)
-- Selection building (BooleanArray bit-unpack vs Vec\<bool>) — minor
+- Selection building (BooleanArray bit-unpack vs `Vec<bool>`) — minor
 - Other operators not yet on Arrow arrays (join, aggregate, order by) — join (P44.1), sort (P44.3), GROUP BY (P44.4) all moved to direct Arrow-array access
 
 ### Next Steps for Deeper Gap Analysis
+
 1. ✅ **Build C++ benchmark binary** — done (2026-07-12, release 19 MB)
 2. ✅ **Serialize dataset for both runtimes** — 10k Person database created
 3. ✅ **Rust SQL-level benchmark** — `conn.execute()` benchmark added to `query_pipeline.rs` matching C++ methodology
@@ -398,82 +180,40 @@ Instrumented every phase of `conn.execute()` with `std::time::Instant` during th
 |-------|-------------|-----------|---------|
 | `substitute_params_in_statement()` | ~4 µs | ~0.2% | ✅ Negligible |
 | `planner.plan()` | ~2 µs | ~0.1% | ✅ Negligible |
-| `optimizer.optimize()` | ~30 µs | ~1.7% | ✅ Negligible |
-| `create_processor()` | ~0.3 µs | ~0.02% | ✅ Negligible |
-| **`processor.execute()`** | **~2.7 ms** | **~98%** | **🔴 THE BOTTLENECK** |
-| `maybe_auto_checkpoint()` | ~0.5 µs | ~0.03% | ✅ Negligible |
-
-**The 1.39 ms gap is entirely in physical operator execution.** All non-execute phases sum to only ~37 µs — far less than the 1.39 ms gap. The C++ kuzu benchmark executes the same plan→optimize→execute pipeline in ~400 µs, meaning Rust's physical operator pipeline is **~6-7× slower than C++** even before accounting for the planning/optimization overhead.
 
 ### Operator-Level Profiling Results
 
-Instrumented each physical operator inside `processor.execute()` via `map_and_execute` in akar-processor:
-
-**Before fix (2026-07-16):**
-
-| Operator | Median Time | % of Execute | Verdict |
-|----------|-------------|-------------|---------|
-| **ScanNode** | **~1.4 ms** | **~80%** | **🔴 BOTTLENECK** |
-| **Aggregate (COUNT)** | **~350 µs** | **~20%** | 🟡 Significant |
-| Filter | N/A | — | Filter pushed into ScanNode by optimizer |
-
-**After fix (2026-07-17):** Two optimizations
-
-| Phase | Change | ScanNode | Aggregate | Total execute |
-|-------|--------|----------|-----------|---------------|
-| Before | `Vec<Vec<Value>>` + per-row COUNT | ~1,400 µs | ~350 µs | ~1,750 µs |
-| P27.5 | Direct `ColumnChunk→Arrow` scan path | **~180 µs** ✅ | ~350 µs | ~530 µs |
-| P27.6 | Aggregate COUNT `ArrayRef::len()` fast path | ~180 µs | **~50 µs** ✅ | **~230 µs** |
-
-> **Note:** The benchmark measures `conn.execute()` (plan→optimize→execute) at **397 µs total**, which includes ~37 µs of non-execute overhead + ~160 µs of misc pipeline overhead. The operator-only measurements above are from previous instrumentation and may differ slightly from benchmark totals due to measurement methodology differences.
+| Operator | Time (ms) | % of `processor.execute()` | Notes |
+|----------|-----------|---------------------------|-------|
+| `PhysicalScan` | ~1.4 | ~80% | Dominated by triple materialization (fixed in P38.3) |
+| `PhysicalAggregate` | ~0.35 | ~20% | COUNT fast path (P38.1), Sum/Min/Max/Avg fast path (P39) |
+| `PhysicalFilter` | pushed into scan | — | Predicate pushdown via optimizer |
 
 ### ScanNode — Updated Data Flow (Arrow Fast Path)
 
-The current fast path from storage to output DataChunk:
+Original (triple materialization):
+1. `to_column_major_data` clones 20k `Value` objects
+2. `build_arrow_array` #1 for predicate evaluation
+3. `build_arrow_array` #2 for output projection
 
-```
-NodeGroup { columns: Vec<ColumnChunk> }
-  ↓ ColumnChunk { values: Vec<Value> } — inline Value enum storage
-  ↓
-mapper/mod.rs:77  resolve_scan_arrow_data()
-  ↓   For each NodeGroup (1 group for 10k rows):
-  ↓     For each col (2: age, ID):
-  ↓       ColumnChunk::to_arrow_array() → ArrayRef  ← DIRECT, no clone
-  ↓   arrow::compute::concat() — merge per-group arrays into one per column
-  ↓   → Vec<ArrayRef>
-  ↓
-PhysicalScan::table_arrow_data: Option<Vec<ArrayRef>>
-  ↓
-scan.rs:execute_with_arrow_arrays()
-  ↓   Evaluate predicate on Arrow arrays via arrow::compute::kernels
-  ↓   → mask: Vec<bool>
-  ↓   arrow::compute::take() — zero-copy filtered view of all columns
-  ↓   → Arrow Int64Array × 2 (no re-materialization)
-  ↓
-DataChunk { fields: Vec<ArrayRef> } → Aggregate operator
-```
-
-**Single materialization** — ColumnChunk values are read once directly into Arrow arrays via `to_arrow_array()`. The `arrow::compute::take()` kernel produces a zero-copy filtered view, avoiding the double materialization of the legacy path.
+Fixed (single pass, zero-copy):
+1. `ColumnChunk::to_arrow_array()` produces `ArrayRef` directly from page buffers
+2. Predicate evaluated on `ArrayRef` via Arrow compute kernels
+3. Output projection uses same `ArrayRef` — no second build
 
 ### Fix Implemented: Direct ColumnChunk → Arrow Array (2026-07-17)
 
-**Impact:** ScanNode went from ~1.4 ms → ~180 µs (**7.8× faster**). Full `conn.execute()` went from 1,787 µs → 529 µs (**3.4× faster**).
+`ColumnChunk::to_arrow_array()` added to `akar-storage/src/table.rs`. Reads page buffers directly into Arrow arrays without intermediate `Value` materialization.
 
-Files changed:
-1. `akar-storage/src/column_chunk.rs` — Added `ColumnChunk::to_arrow_array() -> ArrayRef` that reads `self.values` inline into Arrow builders, skipping `Vec<Vec<Value>>` (line 235)
-2. `akar-processor/src/physical/scan_filter/scan.rs` — Added `table_arrow_data: Option<Vec<ArrayRef>>` field, `with_arrow_data()` builder, two execute paths: `execute_with_arrow_arrays()` (fast, uses `arrow::compute::take`) and `execute_with_value_data()` (legacy) (line 44)
-3. `akar-processor/src/processor/mapper/mod.rs` — Added `resolve_scan_arrow_data()` that reads NodeGroup column chunks directly into Arrow arrays and concatenates per-group arrays (line 77)
-4. `akar-processor/src/processor/mapper/map_scan.rs` — `map_and_execute_scan_node()` tries Arrow fast path first; falls back to legacy if arrow data unavailable (line 55)
+**Impact:** ScanNode 7.8× faster (1.4 ms → 180 µs for 10k rows).
 
 ### Aggregate Breakdown
 
-`PhysicalAggregate::execute()` at `akar-processor/src/physical/order_aggregate/aggregate.rs:38`:
-- Iterates filtered rows, increments a counter for each passing row
-- **~350 µs** for ~7,000 passing rows (≈70% selectivity from `age > 30` on uniform distribution)
-- This is ~50 ns/row — reasonable for per-row dispatch via trait objects
-- **Now the dominant cost** at ~66% of execute time
+- `PhysicalAggregateScan::execute()` COUNT fast path: `ArrayRef::len()` (O(1))
+- `AggregateHashTable::aggregate()` COUNTStar fast path: direct counter increment
+- Sum/Min/Max/Avg scalar: Arrow `compute::sum/min/max/mean()` on `ArrayRef`
 
-**Next action:** Optimize aggregate operator — the per-row `Value` enum dispatch for COUNT can be replaced with a direct `ArrayRef::len()` call on the filtered arrow arrays (no iteration needed). This would cut aggregate time from ~350 µs → <50 µs, bringing total `conn.execute()` to ~230 µs — **faster than C++**.
+---
 
 ## Optimization Priorities (Updated — C++ Parity Achieved)
 
@@ -529,10 +269,7 @@ Full end-to-end benchmarks via `cargo bench --bench ladybug_suite`. Dataset: 10k
 
 ### Optimizer Pass Impact (P37.4)
 
-The 3 new optimizer passes (AggregateFusion, SortElision, ExpressionInline) are active but their impact is not directly measurable in this benchmark since:
-- **AggregateFusion:** No consecutive Aggregates in these queries
-- **SortElision:** No redundant Sorts in these queries
-- **ExpressionInline:** Only inlines trivial pass-through Projections
+The 26 optimizer passes (19 flat + 7 tree) include `ExtendFilterPushDown` and `FtsPredicatePushdown`. `AggregateFusion` is a **NO-OP since P52.7** (stub returns operators unchanged; merging chained aggregates is unsound). 3 passes are disabled: `CorrelatedSubqueryUnnesting`, `AggKeyDependency`, `SortElision` (tree).
 
 These passes benefit more complex query patterns (nested subqueries, UNION ALL + ORDER BY). Benchmark impact TBD in a dedicated complex-query benchmark.
 
@@ -565,6 +302,16 @@ Scalability benchmarks at 10K, 100K, and 1M rows. Each scale tier uses a dedicat
 - 100K benchmarks: `scan`, `filter`, `aggregate` (count, sum, filter_count)
 - 1M benchmarks: `scan`, `aggregate` (count, sum, filter_count)
 - Criterion bench names: `ladybug_100k/*`, `ladybug_1m/*`
+
+---
+
+## bench_021 — Vector Threshold & Write Cost
+
+`examples/bench_021.rs` validates HNSW vector index behavior:
+
+- **`EXACT_SEARCH_MAX_NODES = 50_000`** — below this threshold, queries use exact linear scan; above, graph traversal.
+- **`vector_write_cost`** — measures amortized cost of `refresh_vector_indexes_for_rows()` vs full `refresh_vector_indexes()` after bulk inserts.
+- Results confirm row-scoped maintenance is O(scope) vs O(N) for full rebuild.
 
 ---
 

@@ -4,12 +4,12 @@ use akar_common::types::Value;
 use akar_main::{Connection, Database, SystemConfig};
 use std::sync::Arc;
 
-/// P122.2: `CALL read_markdown_wiki('<folder>')` reads a Markdown wiki from the
-/// data lake and surfaces it as the two declared columns `node` and `rel`.
+/// `CALL read_markdown_wiki('<folder>')` reads a Markdown wiki from the
+/// data lake and surfaces it as the three declared columns `node`, `rel`, `metadata`.
 ///
 /// This also pins the connection-layer behaviour the `CALL` path needs: the
 /// chunk's own column names survive, instead of being flattened to `col_0` /
-/// `col_1` by the row-based table-function path.
+/// `col_1` / `col_2` by the row-based table-function path.
 #[test]
 fn test_read_markdown_wiki_call() -> Result<(), String> {
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -33,13 +33,19 @@ fn test_read_markdown_wiki_call() -> Result<(), String> {
 
     assert_eq!(
         chunk.field_names,
-        vec!["node".to_string(), "rel".to_string()],
+        vec!["node".to_string(), "rel".to_string(), "metadata".to_string()],
         "the declared column names must survive the CALL path"
     );
     assert_eq!(chunk.size, 4, "one note row plus one row per link, per note");
 
     // `get_value`/`is_null` take (field index, row index).
     assert!(chunk.is_null(1, 0), "the note's own row carries a NULL rel");
+    // Metadata should be present on the note's own row (has frontmatter)
+    let meta_val = chunk.get_value(2, 0).expect("note's own row should have metadata");
+    assert!(
+        matches!(meta_val, Value::String(s) if s.contains("title") && s.contains("Alpha")),
+        "metadata should contain title"
+    );
     assert_eq!(chunk.get_value(0, 1), Some(Value::String("notes/a".into())));
     assert_eq!(chunk.get_value(1, 1), Some(Value::String("b".into())));
     assert_eq!(chunk.get_value(1, 2), Some(Value::String("c".into())));

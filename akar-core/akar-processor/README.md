@@ -2,7 +2,7 @@
 
 Physical operator execution pipeline — the runtime that executes query plans.
 
-**Physical operators (48 structs):**
+**Physical operators (51 structs):**
 - `PhysicalScan` — reads column-major table data into DataChunks
 - `PhysicalFilter` — evaluates expressions, produces selection vectors
 - `PhysicalProjection` — selects/orders columns
@@ -28,4 +28,4 @@ Physical operator execution pipeline — the runtime that executes query plans.
 **Pipeline:** `QueryProcessor::execute(&[LogicalOperator])` -> flattens plan -> runs
 physical operators -> returns `Vec<DataChunk>`.
 
-**Tests:** 157
+**Tests:** 187

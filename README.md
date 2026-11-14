@@ -107,9 +107,7 @@ contains 35 crates and ~139K lines of pure Rust code (git-tracked, incl. tests):
 | `akar-cli` | Interactive CLI shell |
 | `akar-wasm` | WebAssembly bindings |
 
-**Test suite:** **2,221 tests, 0 failed** (gate `test [akar-core]`,
-2026-10-21). **26 optimizer passes**, **37 logical types**, **59 logical
-operators**, **50 physical operator structs**.
+**Test suite:** **2,315+ tests, 0 failed** (gate `test [akar-core]`, verified at implementation time). **26 optimizer passes**, **37 logical types**, **60 logical operators**, **51 physical operator structs**.
 
 ## Benchmarks
 

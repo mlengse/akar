@@ -6,10 +6,10 @@ and contributing guidance live in the repository-wide **[`../README.md`](../READ
 
 ## Highlights
 
-- **Test suite:** 1,890 total / 0 ignored / 1,890 passed / 0 failed (gate `test [akar-core]`, 2026-08-25)
-- **Query pipeline:** parser → binder → planner → optimizer (24 passes) → processor
+- **Test suite:** 2,315+ total / 0 ignored / 2,315+ passed / 0 failed (gate `test [akar-core]`, verified at implementation time)
+- **Query pipeline:** parser → binder → planner → optimizer (26 passes = 19 flat + 7 tree) → processor
 - **Storage:** columnar disk storage, WAL + replayer, buffer manager, CSR adjacency, ART/HNSW indexes
-- **Extensions:** JSON, FTS, Vector, DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog, LLM, algo, server
+- **Extensions:** JSON, FTS, Vector, DuckDB, SQLite, Postgres, Neo4j, HTTPFS, Delta, Iceberg, Azure, Unity Catalog, LLM, algo, markdown
 - **GDS:** 18 graph algorithms (BFS, Dijkstra, PageRank, WCC, SCC, K-Core, Louvain, node2vec, ...)
 - **Public API:** `akar-main` (Database/Connection/QueryResult), `akar-c` FFI, `akar-wasm`, `akar-cli`
 

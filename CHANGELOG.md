@@ -5,6 +5,42 @@
 >
 > **Cara membaca (konvensi entri baru):** satu baris judul — `P### — ringkasan` · hash commit · angka gate — lalu maksimal 3–4 sub-bullet berisi hanya keputusan/perubahan yang tidak terlihat dari kode. Detail panjang (repro, formula, jejak file:line) **tidak** ditulis di sini: ada di `git show <hash>` dan `SPEC.md`. Entri versi lama (sebelum konvensi ini) masih berupa paragraf padat — dibiarkan sebagai arsip.
 
+## **Indeks Rilis**
+
+| Versi | Tanggal | Status | Catatan |
+|-------|---------|--------|---------|
+| 0.3.4 | 2026-11-05 | Released | MERGE OCC retry, row-scoped vector maintenance, exact scan threshold |
+| 0.3.3 | 2026-10-27 | Released | Secondary indexes end-to-end, typed multi-edge relationships |
+| 0.3.2 | 2026-10-24 | Released | Secondary index + dedup write path |
+| 0.3.0 | 2026-10-23 | Released | akar-server removed, Akar 100% embedded library (§13) |
+| 0.2.5 | 2026-10-13 | Released | MVCC repair, negative literals, CLI presentation, akar-server removal |
+| 0.2.4 | 2026-09-23 | Released | SIMD NEON aarch64 kernel |
+| 0.2.3 | 2026-09-18 | Released | — |
+| 0.2.2 | 2026-09-17 | Released | — |
+| 0.2.1 | 2026-09-14 | Released | — |
+| 0.1.21 | 2026-09-07 | Released | — |
+| 0.1.20 | 2026-09-04 | Released | — |
+| 0.1.19 | 2026-08-31 | Released | — |
+| 0.1.18 | 2026-08-30 | Released | — |
+| 0.1.17 | 2026-08-30 | Released | — |
+| 0.1.16 | 2026-08-29 | Released | — |
+| 0.1.15 | 2026-08-27 | Released | — |
+| 0.1.14 | 2026-08-26 | Released | — |
+| 0.1.13 | 2026-08-26 | Released | — |
+| 0.1.12 | 2026-08-25 | Released | Test count reconciled |
+| 0.1.11 | 2026-08-25 | Released | — |
+| 0.1.10 | 2026-08-24 | Released | — |
+| 0.1.9 | 2026-08-23 | Released | — |
+| 0.1.8 | 2026-08-18 | Released | — |
+| 0.1.7 | 2026-08-18 | Released | — |
+| 0.1.6 | 2026-08-17 | Released | — |
+| 0.1.5 | 2026-08-11 | Released | — |
+| 0.1.4 | 2026-08-10 | Released | — |
+| 0.1.3 | 2026-08-10 | Released | — |
+| 0.1.2 | 2026-08-09 | Released | — |
+
+
+
 ## [Unreleased]
 
 ## [0.3.4] - 2026-11-05
@@ -27,11 +63,11 @@
 
 ### Changed
 
-- **Row-scoped vector index maintenance (feature 025, WP-A1 / SC-001 / SC-002 / FR-001--FR-004)** * gates: cargo test -p akar-storage --test vector_index_row_scope_test **5 passed / 0 failed** * cargo bench -p akar-main --bench vector_write_cost **1k: 5.394 ms, 10k: 4.405 ms (ratio 0.817, target <= 2.0x)**
+- **Row-scoped vector index maintenance (feature 025, WP-A1 / SC-001 / SC-002 / FR-001--FR-004)** * gates: cargo test -p akar-storage --test vvector_index_row_scope_test **5 passed / 0 failed** * cargo bench -p akar-main --bench vector_write_cost **1k: 5.394 ms, 10k: 4.405 ms (ratio 0.817, target <= 2.0x)**
   - Added MaintenanceOutcome and TableCatalog::refresh_vector_index_rows to reconcile vector indexes only for modified (table_id, row_id) pairs, eliminating full table scans on write statements.
   - Database::refresh_vector_indexes_for_rows provides the public additive entry point, retaining Database::refresh_vector_indexes as table-wide repair.
-  - In Connection::query and bulk ingest (ulk.rs::insert_nodes), written rows are captured once and dispatched to row-scoped maintenance post-commit, with an observable debug fallback to table-wide rebuild if a write operator reports no row IDs.
-  - Verified by ector_index_row_scope_test (single-row insert examines 1 row, non-indexed writes examine 0 rows, vector update replaces in-place, delete tombstones row).
+  - In Connection::query and bulk ingest (bulk.rs::insert_nodes), written rows are captured once and dispatched to row-scoped maintenance post-commit, with an observable debug fallback to table-wide rebuild if a write operator reports no row IDs.
+  - Verified by vector_index_row_scope_test (single-row insert examines 1 row, non-indexed writes examine 0 rows, vector update replaces in-place, delete tombstones row).
 
 - **Exact scan below a node threshold; HNSW graph built lazily (feature 024, T064/T013; feature 025, T045)**
   - Supported operating range is documented in `SPEC.md` §12.3: at or below 50,000 vectors (`EXACT_SEARCH_MAX_NODES`), exact search delivers guaranteed recall@10 of 1.000 and 7.7 ms 10k build. Above 50,000 vectors the graph path is unmeasured. Run `cargo run -p akar-vector --release --example bench_021` to reproduce. · gates on 2026-10-30: `cargo test --workspace` **0 failed** (recorded run), `cargo test -p akar-vector` **50 lib + 3 integration passed**, `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo fmt --all -- --check` clean, `python tools/doc-check.py --root akar` PASS · `cargo run -p akar-vector --release --example bench_021` (same 384-d corpus and harness as the 0.3.3 record)
@@ -109,11 +145,6 @@
 
 ### Fixed
 
-- **MVCC transaction rollback repair and OCC retry loop for concurrent MERGE (feature 025, SC-006 / FR-005)** · gate `cargo test --workspace` **141 suites passed / 0 failed (3 consecutive runs)** · `cargo test -p akar-main --test test_typed_edges concurrent_merges_leave_one_node` **6/6 passed in isolation**
-  - Resolved OCC write-conflict rollback defect in `Connection::commit_write_txn`: resources were extracted from `txn_resources` prior to `prepare_commit`, causing `rollback_write_txn` to find `None` and silently bypass `StorageManager::rollback_transaction` and undo-record execution.
-  - Repaired `VectorVersionInfo` and `NodeTable` MVCC visibility tracking: rolling back an uncommitted insert now removes the inserted transaction ID via `remove_insert` instead of retaining the aborted txn ID, which previously caused the row to remain permanently invisible to snapshot reads.
-  - Added OCC conflict retry loop with backoff in `concurrent_merges_leave_one_node`, allowing concurrent workers colliding on the same row key to serialize cleanly.
-
 - **P135 withdrawal completed on crates.io; `akar` 0.2.5 wheel published to PyPI (workspace backlog T043/T046, 2026-10-14)** · `CHANGELOG.md` · release-owner external actions, no code change
   - **Yank done:** `cargo yank akar-server --version <v>` applied to every published version (0.1.0–0.1.3, 0.1.12–0.1.21, 0.2.0–0.2.4) — 19 OK / 0 FAIL. crates.io reports `0.2.4` `yanked: true` and no non-yanked version remains (`latest` = 0.0.0); reversible via `cargo yank --undo`. This closes the P135 distribution-shape removal that the 0.2.5 release left as an external action.
   - **PyPI wheel:** `akar-core/akar-python/pyproject.toml` bumped `0.2.4` → `0.2.5`; `maturin build --release` produced `akar-0.2.5-cp39-abi3-win_amd64.whl`, uploaded to PyPI — `akar 0.2.5` confirmed live (unblocks the sulur `akar` pin, workspace T039).
@@ -135,7 +166,7 @@
 
 ### Removed
 
-- **P135 — crate `akar-server` dihapus dari workspace; Akar 100% pustaka embedded (§13 / ADR-02)** · `[Uncommitted]` · gate **2,300**
+- **P135 — crate `akar-server` dihapus dari workspace; Akar 100% pustaka embedded (§13 / ADR-02)** · gate **2,300**
   - Crate broker terakhir `akar-server` dihapus dari `akar-core/Cargo.toml` (members) dan `PUBLISH_ORDER` (`tools/release.py`); `akar-server` hilang total dari workspace, bukan sekadar diturunkan perannya (P124). **Yank** crates.io seluruh versi (19) selesai 2026-10-14 — lihat `[Unreleased]`.
   - **Tes tidak hilang** (arah §8.1 "migrasi dulu, hapus belakangan"): 4 tes `DreamCycle` kembali ke `akar-dream` (`src/cycle_tests.rs`, sequencer *test-only* — crate tetap primitif-only, §13); 41 tes framing/session/auth/param-binding menjadi fixture `#[cfg(test)]` di `akar-main/tests/test_remote_server.rs` + `tests/server_fixture/`, satu-satunya cara `Database::connect_tcp` tetap punya uji putaran penuh. 12 tes duplikat (`dream_control`/`DreamControl::with_db`/`GraphBackend`, `daemon_log`) dihapus — `daemon_log` sudah hidup di `sulur-server` (P6-LOG-1).
   - Rekonsiliasi: SPEC §1.2/§2/§3.2/§7/§9.1/§11.1/§13.4 + `README.md` + prosa `remote.rs`; counts **36 → 35** crate, tes **2,267 → 2,300** (2,291 unit/integrasi + 9 doctest; net −12 dari penghapusan duplikat). `sulur/tools/boundary-check.py` BC-02 diselaraskan (crate hilang → INFO "(clean)").
@@ -169,11 +200,6 @@
 
 ### Fixed
 
-- **MVCC transaction rollback repair and OCC retry loop for concurrent MERGE (feature 025, SC-006 / FR-005)** · gate `cargo test --workspace` **141 suites passed / 0 failed (3 consecutive runs)** · `cargo test -p akar-main --test test_typed_edges concurrent_merges_leave_one_node` **6/6 passed in isolation**
-  - Resolved OCC write-conflict rollback defect in `Connection::commit_write_txn`: resources were extracted from `txn_resources` prior to `prepare_commit`, causing `rollback_write_txn` to find `None` and silently bypass `StorageManager::rollback_transaction` and undo-record execution.
-  - Repaired `VectorVersionInfo` and `NodeTable` MVCC visibility tracking: rolling back an uncommitted insert now removes the inserted transaction ID via `remove_insert` instead of retaining the aborted txn ID, which previously caused the row to remain permanently invisible to snapshot reads.
-  - Added OCC conflict retry loop with backoff in `concurrent_merges_leave_one_node`, allowing concurrent workers colliding on the same row key to serialize cleanly.
-
 - **P132 (#36I) — alamat per-edge: `DELETE r` / `SET r.…` menyasar edge yang di-match, bukan offset baris node sumber** · `akar-processor/src/physical/write_ops/{recursiveextend,delete,set}.rs`, `akar-planner/src/{logical_operator,planner}.rs`, `akar-processor/src/processor/mapper/map_update.rs` · gate **2,267** (+3: 2,264 → 2,267; `test_p132_edge_addressing.rs`)
   - `PhysicalExtend` hanya memancarkan `<dst>._id`, tak pernah indeks edge; `PhysicalDelete`/`PhysicalSet` membaca kolom `_id` **pertama** (= offset baris node sumber). Akibatnya satu `DELETE r` menghapus paling banyak satu edge per offset (sering bukan yang di-match), `DELETE` kedua = no-op tombstone, dan `SET` ber-scope = no-op diam.
   - `PhysicalExtend` kini juga memancarkan `<rel_var>._id` (indeks edge) untuk edge bernama (`-[r:…]->`) — diletakkan **setelah** `<dst>._id` agar fallback "kolom `_id` pertama" tak berubah untuk edge anonim/node-only scan.
@@ -197,7 +223,7 @@
 
 ### Deprecated
 
-- **T020 — helper warisan implementasi FTS dari-nol didepresiasi (penghapusan di 0.3.0)** · `akar-fts/src/lib.rs` · `[Uncommitted]` · gate `clippy -p akar-fts --all-targets -- -D warnings` clean, `test -p akar-fts` 53 passed / 0 failed, `fmt -p akar-fts` clean
+- **T020 — helper warisan implementasi FTS dari-nol didepresiasi (penghapusan di 0.3.0)** · `akar-fts/src/lib.rs` · gate `clippy -p akar-fts --all-targets -- -D warnings` clean, `test -p akar-fts` 53 passed / 0 failed, `fmt -p akar-fts` clean
   - `tf_idf`, `STOP_WORDS`, `remove_stop_words`, `term_frequencies` — residu Audit 2 NIT: hanya dipakai tes lib, bukan jalur produksi (backend kini Tantivy). `#[deprecated(since = "0.2.5")]`; penghapusan bersifat breaking → masuk 0.3.0, bukan patch.
   - Lima tes kontrak helper memakai `#[allow(deprecated)]` agar gate CI `-D warnings` tetap hijau sampai penghapusan.
 

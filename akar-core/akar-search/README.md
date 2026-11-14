@@ -13,4 +13,4 @@ use akar_search::rrf_fuse_ref;
 let fused = rrf_fuse_ref(&ranked_lists, k);
 ```
 
-**Tests:** 23
+**Tests:** 50

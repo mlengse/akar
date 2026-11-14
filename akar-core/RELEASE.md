@@ -139,24 +139,44 @@ Publishing to crates.io is **active** (Sprint 18/P50, 2026-08-08). The full proc
 ### Dependency Publication Order (33 crates)
 
 ```
-akar-common
-  → akar-storage, akar-transaction, akar-function, akar-parser
-    → akar-catalog
-      → akar-binder
-        → akar-planner
-          → akar-optimizer
-            → akar-processor
-              → akar-graph
-                → akar-main
-                  → akar-cli
-                  → akar-wasm
-                  → akar-migrate
-                  → akar-c
+akar-common        (no deps)
+akar-parser        (no deps)
+akar-function      (common)
+akar-catalog       (common)
+akar-transaction   (common)
+akar-extension     (common, function, catalog)
+akar-binder        (common, parser, catalog)
+akar-vector        (common, function, extension)
+akar-storage       (common, catalog, transaction, vector)
+akar-fts           (common, function, extension, storage)
+akar-planner       (common, binder, parser, catalog)
+akar-graph         (common, storage)
+akar-optimizer     (common, planner, storage, binder, parser)
+akar-processor     (common, catalog, planner, function, storage, transaction, parser, fts, vector, binder)
+akar-ml            (common, function, extension, catalog)
+akar-json          (common, function, extension)
+akar-httpfs        (common, function, extension)
+akar-markdown      (common, function, extension)
+akar-duckdb        (common, function, extension) — must precede delta/iceberg/azure/unity-catalog
+akar-algo          (common, function, extension, graph, catalog)
+akar-neo4j         (function, extension)
+akar-llm           (common, function, extension)
+akar-sqlite        (common, function, extension)
+akar-postgres      (common, function, extension, catalog)
+akar-delta         (common, function, extension, duckdb)
+akar-iceberg       (common, function, extension, duckdb)
+akar-azure         (common, function, extension, duckdb)
+akar-unity-catalog (common, function, extension, duckdb)
+akar-search        (no deps)
+akar-main          (depends on ALL core + json/httpfs/duckdb/algo/llm/sqlite/delta/iceberg/azure/postgres)
+akar-migrate       (main, storage, common)
+akar-wasm          (main, common)
+akar-cli           (main, common, binder, catalog)
 ```
 
-Extension crates (akar-json, akar-markdown, akar-fts, akar-vector, akar-httpfs, akar-duckdb, akar-algo, akar-neo4j, akar-llm, akar-sqlite, akar-delta, akar-iceberg, akar-azure, akar-postgres, akar-unity-catalog, akar-ml) can be published in any order after their core dependencies are available.
+Extension crates (akar-json, akar-markdown, akar-fts, akar-vector, akar-httpfs, akar-duckdb, akar-algo, akar-neo4j, akar-llm, akar-sqlite, akar-delta, akar-iceberg, akar-azure, akar-unity-catalog, akar-search, akar-postgres) can be published in any order after their core dependencies are available.
 
-**SKIP_CRATES (non-publishable):** `akar-python` (PyPI, frozen at 0.2.5), `akar-fuzz` (internal), `akar-server` (deleted), `akar-dream` (deleted)
+**SKIP_CRATES (non-publishable):** `akar-c` (FFI cdylib, local builds only), `akar-python` (PyPI, frozen at 0.2.5), `akar-fuzz` (internal), `akar-server` (deleted), `akar-dream` (deleted)
 
 ### Status
 
@@ -164,3 +184,26 @@ As of 2026-11-05: **33/33 published** (bottom-up, dependency-ordered). Latest re
 Detail per-crate patch per rilis tercatat di [`CHANGELOG.md`](../CHANGELOG.md) — jangan
 duplikasi tabel versi di sini agar tidak drift.
 Rate limit: 1 crate/min after the initial burst (30).
+
+---
+
+## Release Script Usage
+
+```bash
+# Full release (gate → bump → dep align → commit → tag → crates.io → GitHub)
+python tools/release.py 0.3.4
+
+# Dry run (gate + version bump only, no publish)
+python tools/release.py 0.3.4 --dry
+
+# Skip tests (use with caution)
+python tools/release.py 0.3.4 --skip-gate
+
+# Only crates.io publish (assumes version already bumped & tagged)
+python tools/release.py --publish-only 0.3.4
+```
+
+Prerequisites:
+- `cargo login <token>` (or `CARGO_REGISTRY_TOKEN` env var)
+- `gh auth login` (for GitHub release creation)
+- Clean working tree (or `--allow-dirty`)
