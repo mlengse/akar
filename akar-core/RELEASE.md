@@ -23,7 +23,7 @@ The current version is tracked in `akar-core/Cargo.toml` under `[workspace.packa
 
 > **Note (2026-11-14):** beberapa crate telah dikonversi dari `version.workspace = true` ke
 > versi eksplisit sendiri (akar-function, akar-json, akar-llm, akar-ml, akar-neo4j,
-> akar-search, akar-dream, dst.) agar bisa di-bump independen. Untuk crate tersebut,
+> akar-search, dst.) agar bisa di-bump independen. Untuk crate tersebut,
 > bump versi langsung di `Cargo.toml` masing-masing, bukan lewat `[workspace.package]`.
 
 ---
@@ -129,8 +129,8 @@ This runs tests and a release build to verify everything compiles, without creat
 
 Publishing to crates.io is **active** (Sprint 18/P50, 2026-08-08). The full process:
 
-1. All internal crates have `publish = true` (only `akar-c` remains `publish = false` —
-   FFI cdylib, local builds only). `akar-server` and `akar-dream` have been deleted.
+1. All 33 publishable crates have `publish = true` (only `akar-c` remains `publish = false` —
+   FFI cdylib, local builds only; legacy daemon/dream crates are no longer part of the workspace).
 2. Publish internal crates bottom-up in dependency order (see graph below), paced by the
    crates.io rate limit.
 3. `akar-main`'s path dependencies ship with `version = "0.3.0"` so they resolve to the registry copies after publish.
@@ -176,7 +176,7 @@ akar-cli           (main, common, binder, catalog)
 
 Extension crates (akar-json, akar-markdown, akar-fts, akar-vector, akar-httpfs, akar-duckdb, akar-algo, akar-neo4j, akar-llm, akar-sqlite, akar-delta, akar-iceberg, akar-azure, akar-unity-catalog, akar-search, akar-postgres) can be published in any order after their core dependencies are available.
 
-**SKIP_CRATES (non-publishable):** `akar-c` (FFI cdylib, local builds only), `akar-python` (PyPI, frozen at 0.2.5), `akar-fuzz` (internal), `akar-server` (deleted), `akar-dream` (deleted)
+**SKIP_CRATES (non-publishable):** `akar-c` (FFI cdylib, local builds only), `akar-python` (PyPI, frozen at 0.2.5), `akar-fuzz` (internal)
 
 ### Status
 
