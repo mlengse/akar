@@ -470,13 +470,38 @@ pub fn map_and_execute_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::processor::QueryProcessor;
+    use akar_binder::bound_statement::BoundExpression;
+    use akar_common::selection::SelectionVector;
     use akar_common::types::LogicalTypeID;
-    use akar_common::vector::SelectionVector;
-    use akar_planner::logical_operator::{BoundExpression, LogicalOrderBy, LogicalProjection};
+    use akar_planner::logical_operator::{LogicalOrderBy, LogicalProjection};
+
+    fn test_ctx(processor: &QueryProcessor) -> ExecutionContext<'_> {
+        ExecutionContext {
+            processor,
+            function_registry: None,
+            table_catalog: None,
+            storage_manager: None,
+            vfs: None,
+            standalone_call_handler: None,
+            sequence_fn: None,
+            subquery_fn: None,
+            schema_ddl_fn: None,
+            snapshot_ts: None,
+            commit_history: std::collections::HashMap::new(),
+            written_rows: Vec::new(),
+            txn_id: None,
+            extend_prune: None,
+            limit_budget: None,
+            memory_pool: None,
+            spill_dir: None,
+        }
+    }
 
     #[test]
     fn resolve_sort_keys_handles_zero_active_row_schemaless_chunk() {
-        let mut ctx = ExecutionContext::default();
+        let processor = QueryProcessor::new();
+        let mut ctx = test_ctx(&processor);
         let chunk = DataChunk {
             fields: Vec::new(),
             field_types: Vec::new(),
@@ -494,7 +519,8 @@ mod tests {
 
     #[test]
     fn order_by_and_projection_preserve_empty_schema_over_filtered_empty_chunk() {
-        let mut ctx = ExecutionContext::default();
+        let processor = QueryProcessor::new();
+        let mut ctx = test_ctx(&processor);
         let filtered_empty = DataChunk {
             fields: Vec::new(),
             field_types: Vec::new(),
@@ -505,10 +531,12 @@ mod tests {
         let proj = LogicalOperator::Projection(LogicalProjection {
             expressions: vec![BoundExpression {
                 expression: Expression::Variable("id".to_string()),
-                alias: Some("id".to_string()),
                 resolved_type: LogicalTypeID::String,
+                is_constant: false,
+                alias: Some("id".to_string()),
             }],
             children: Vec::new(),
+            cardinality: 0,
         });
         let projected =
             map_and_execute_projection(&proj, vec![filtered_empty], &mut ctx).expect("projection ok");
@@ -519,6 +547,7 @@ mod tests {
         let order_op = LogicalOperator::OrderBy(LogicalOrderBy {
             sort_keys: vec![(Expression::Variable("id".to_string()), true)],
             children: Vec::new(),
+            cardinality: 0,
         });
         let ordered =
             map_and_execute_projection(&order_op, projected, &mut ctx).expect("order_by ok");
