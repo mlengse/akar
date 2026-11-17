@@ -311,60 +311,34 @@ pub trait FrontierPair: Send + Sync {
 ///
 /// Unlike other algorithms, shortest path guarantees each node is visited at most once,
 /// so current and next frontiers write to the same underlying storage.
-///
-/// The `*_frontier` reference fields and `num_nodes` are retained from the
-/// multi-table port; `pin_*_frontier` are no-ops in this simplified
-/// implementation, which reads `dense_frontier`/`sparse_frontier` directly, so
-/// those fields are not yet read.
-#[allow(dead_code)]
 pub struct SPFrontierPair {
     state: GDSDensityState,
     dense_frontier: Option<DenseFrontier>,
-    cur_dense_frontier: Option<DenseFrontierReference>,
-    next_dense_frontier: Option<DenseFrontierReference>,
     sparse_frontier: Option<SparseFrontier>,
-    cur_sparse_frontier: Option<SparseFrontierReference>,
-    next_sparse_frontier: Option<SparseFrontierReference>,
     cur_iter: Iteration,
     has_active_nodes: AtomicU64,
-    num_nodes: u64,
 }
 
 impl SPFrontierPair {
     pub fn new_dense(num_nodes: usize) -> Self {
         let dense = DenseFrontier::new(num_nodes, FRONTIER_UNVISITED);
-        // Source node (offset 0 if we track it) is visited in iter 0
-        let cur_ref = DenseFrontierReference::new(&dense);
-        let next_ref = DenseFrontierReference::new(&dense);
         Self {
             state: GDSDensityState::Dense,
             dense_frontier: Some(dense),
-            cur_dense_frontier: Some(cur_ref),
-            next_dense_frontier: Some(next_ref),
             sparse_frontier: None,
-            cur_sparse_frontier: None,
-            next_sparse_frontier: None,
             cur_iter: 0,
             has_active_nodes: AtomicU64::new(0),
-            num_nodes: num_nodes as u64,
         }
     }
 
     pub fn new_sparse() -> Self {
         let sparse = SparseFrontier::new();
-        let cur_ref = SparseFrontierReference::new(&sparse);
-        let next_ref = SparseFrontierReference::new(&sparse);
         Self {
             state: GDSDensityState::Sparse,
             dense_frontier: None,
-            cur_dense_frontier: None,
-            next_dense_frontier: None,
             sparse_frontier: Some(sparse),
-            cur_sparse_frontier: Some(cur_ref),
-            next_sparse_frontier: Some(next_ref),
             cur_iter: 0,
             has_active_nodes: AtomicU64::new(0),
-            num_nodes: 0,
         }
     }
 
@@ -805,6 +779,13 @@ mod tests {
         assert_eq!(f.get_iteration(5), FRONTIER_UNVISITED);
         f.add_node_offset(5, 1);
         assert_eq!(f.get_iteration(5), 1);
+        assert!(f.compare_exchange(5, 1, 2));
+        assert_eq!(
+            f.get_atomic(5).map(|a| a.load(Ordering::SeqCst)),
+            Some(2)
+        );
+        f.reset(FRONTIER_UNVISITED);
+        assert_eq!(f.get_iteration(5), FRONTIER_UNVISITED);
     }
 
     #[test]

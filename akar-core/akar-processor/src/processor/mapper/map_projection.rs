@@ -80,6 +80,12 @@ fn projected_empty_chunk(field_names: Vec<String>, field_types: Vec<PhysicalType
     }
 }
 
+/// Effective active row count of a `DataChunk` honoring any `SelectionVector`.
+#[inline]
+fn effective_chunk_len(chunk: &DataChunk) -> usize {
+    chunk.sel_vector.as_ref().map_or(chunk.size, |s| s.size)
+}
+
 /// Resolve ORDER BY / TOP-K sort keys to column indices.
 ///
 /// Sort keys are expressions (e.g. `p.age`); they must be mapped to the actual
@@ -99,15 +105,19 @@ fn resolve_sort_keys(
     input: &[DataChunk],
     ctx: &mut ExecutionContext,
 ) -> Result<(Vec<(u32, bool)>, Vec<DataChunk>, usize), ProcessorError> {
-    if input.iter().all(|chunk| chunk.size == 0) {
+    if input.iter().all(|chunk| effective_chunk_len(chunk) == 0) {
         return Ok((Vec::new(), input.to_vec(), 0));
     }
 
-    let base_cols = input.first().map(|c| c.num_fields()).unwrap_or(0);
+    let schema_chunk = input
+        .iter()
+        .find(|c| !c.field_names.is_empty())
+        .or_else(|| input.first());
+    let base_cols = schema_chunk.map(|c| c.num_fields()).unwrap_or(0);
     let mut resolved = Vec::with_capacity(sort_keys.len());
     let mut computed: Vec<Expression> = Vec::new();
     for (expr, asc) in sort_keys.iter() {
-        let col = input.first().and_then(|c| resolve_projection_column_index(expr, c));
+        let col = schema_chunk.and_then(|c| resolve_projection_column_index(expr, c));
         match col {
             Some(idx) => resolved.push((idx as u32, *asc)),
             None => {
@@ -132,6 +142,9 @@ fn resolve_sort_keys(
     }
     let mut augmented = Vec::with_capacity(input.len());
     for chunk in input {
+        if effective_chunk_len(chunk) == 0 {
+            continue;
+        }
         let mut fields = chunk.fields.clone();
         let mut field_types = chunk.field_types.clone();
         for expr in &computed {
@@ -246,7 +259,7 @@ pub fn map_and_execute_projection(
 
             let result = if p.expressions.is_empty() {
                 input
-            } else if input.iter().all(|chunk| chunk.size == 0) {
+            } else if input.iter().all(|chunk| effective_chunk_len(chunk) == 0) {
                 // Empty input still carries the full projected schema (F16), so
                 // downstream ORDER BY key resolution and named-column consumers
                 // work on empty results. Mirrors `PhysicalProjection`'s
@@ -451,5 +464,66 @@ pub fn map_and_execute_projection(
             Ok(results)
         }
         _ => Err(format!("Not a projection/filter operator: {:?}", op).into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akar_common::types::LogicalTypeID;
+    use akar_common::vector::SelectionVector;
+    use akar_planner::logical_operator::{BoundExpression, LogicalOrderBy, LogicalProjection};
+
+    #[test]
+    fn resolve_sort_keys_handles_zero_active_row_schemaless_chunk() {
+        let mut ctx = ExecutionContext::default();
+        let chunk = DataChunk {
+            fields: Vec::new(),
+            field_types: Vec::new(),
+            size: 4,
+            field_names: Vec::new(),
+            sel_vector: Some(SelectionVector::new(0)),
+        };
+        let sort_keys = vec![(Expression::Variable("id".to_string()), true)];
+        let (keys, out, extra) =
+            resolve_sort_keys(&sort_keys, &[chunk], &mut ctx).expect("empty chunk must not fail");
+        assert!(keys.is_empty());
+        assert_eq!(extra, 0);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn order_by_and_projection_preserve_empty_schema_over_filtered_empty_chunk() {
+        let mut ctx = ExecutionContext::default();
+        let filtered_empty = DataChunk {
+            fields: Vec::new(),
+            field_types: Vec::new(),
+            size: 3,
+            field_names: Vec::new(),
+            sel_vector: Some(SelectionVector::new(0)),
+        };
+        let proj = LogicalOperator::Projection(LogicalProjection {
+            expressions: vec![BoundExpression {
+                expression: Expression::Variable("id".to_string()),
+                alias: Some("id".to_string()),
+                resolved_type: LogicalTypeID::String,
+            }],
+            children: Vec::new(),
+        });
+        let projected =
+            map_and_execute_projection(&proj, vec![filtered_empty], &mut ctx).expect("projection ok");
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].size, 0);
+        assert_eq!(projected[0].field_names, vec!["id".to_string()]);
+
+        let order_op = LogicalOperator::OrderBy(LogicalOrderBy {
+            sort_keys: vec![(Expression::Variable("id".to_string()), true)],
+            children: Vec::new(),
+        });
+        let ordered =
+            map_and_execute_projection(&order_op, projected, &mut ctx).expect("order_by ok");
+        assert_eq!(ordered.len(), 1);
+        assert_eq!(ordered[0].size, 0);
+        assert_eq!(ordered[0].field_names, vec!["id".to_string()]);
     }
 }
