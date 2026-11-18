@@ -510,8 +510,7 @@ mod tests {
             sel_vector: Some(SelectionVector::new(0)),
         };
         let sort_keys = vec![(Expression::Variable("id".to_string()), true)];
-        let (keys, out, extra) =
-            resolve_sort_keys(&sort_keys, &[chunk], &mut ctx).expect("empty chunk must not fail");
+        let (keys, out, extra) = resolve_sort_keys(&sort_keys, &[chunk], &mut ctx).expect("empty chunk must not fail");
         assert!(keys.is_empty());
         assert_eq!(extra, 0);
         assert_eq!(out.len(), 1);
@@ -538,8 +537,7 @@ mod tests {
             children: Vec::new(),
             cardinality: 0,
         });
-        let projected =
-            map_and_execute_projection(&proj, vec![filtered_empty], &mut ctx).expect("projection ok");
+        let projected = map_and_execute_projection(&proj, vec![filtered_empty], &mut ctx).expect("projection ok");
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].size, 0);
         assert_eq!(projected[0].field_names, vec!["id".to_string()]);
@@ -549,8 +547,7 @@ mod tests {
             children: Vec::new(),
             cardinality: 0,
         });
-        let ordered =
-            map_and_execute_projection(&order_op, projected, &mut ctx).expect("order_by ok");
+        let ordered = map_and_execute_projection(&order_op, projected, &mut ctx).expect("order_by ok");
         assert_eq!(ordered.len(), 1);
         assert_eq!(ordered[0].size, 0);
         assert_eq!(ordered[0].field_names, vec!["id".to_string()]);

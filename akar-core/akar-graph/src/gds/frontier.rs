@@ -780,10 +780,7 @@ mod tests {
         f.add_node_offset(5, 1);
         assert_eq!(f.get_iteration(5), 1);
         assert!(f.compare_exchange(5, 1, 2));
-        assert_eq!(
-            f.get_atomic(5).map(|a| a.load(Ordering::SeqCst)),
-            Some(2)
-        );
+        assert_eq!(f.get_atomic(5).map(|a| a.load(Ordering::SeqCst)), Some(2));
         f.reset(FRONTIER_UNVISITED);
         assert_eq!(f.get_iteration(5), FRONTIER_UNVISITED);
     }
