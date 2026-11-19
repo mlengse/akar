@@ -116,11 +116,7 @@ fn read_markdown_wiki(args: &[Value], chunk: &mut DataChunk) -> Result<(), Strin
     let meta_column: ArrayRef = Arc::new(StringArray::from_iter(metadatas.iter().map(|meta| meta.as_deref())));
 
     chunk.fields = vec![node_column, rel_column, meta_column];
-    chunk.field_types = vec![
-        PhysicalTypeID::String,
-        PhysicalTypeID::String,
-        PhysicalTypeID::String,
-    ];
+    chunk.field_types = vec![PhysicalTypeID::String, PhysicalTypeID::String, PhysicalTypeID::String];
     chunk.field_names = vec!["node".into(), "rel".into(), "metadata".into()];
     chunk.size = size;
     Ok(())
@@ -200,11 +196,7 @@ mod tests {
         );
         assert_eq!(
             chunk.field_types,
-            vec![
-                PhysicalTypeID::String,
-                PhysicalTypeID::String,
-                PhysicalTypeID::String
-            ]
+            vec![PhysicalTypeID::String, PhysicalTypeID::String, PhysicalTypeID::String]
         );
 
         let nodes = chunk.fields[0]

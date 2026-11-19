@@ -1,8 +1,8 @@
 use akar_common::memory::MemoryManager;
 use akar_storage::buffer_manager::{BufferManager, BufferManagerConfig};
 use akar_storage::vector_index::VectorIndexTable;
-use akar_vector::hnsw::HnswIndex;
 use akar_vector::DistanceMetric;
+use akar_vector::hnsw::HnswIndex;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -61,7 +61,10 @@ fn test_vector_index_graph_persistence_roundtrip() {
 
     // Verify instant warmup without rebuilding: graph is already built
     assert_eq!(loaded.hnsw().len(), 50);
-    assert!(loaded.hnsw().is_graph_built(), "reloaded index must have graph_built == true");
+    assert!(
+        loaded.hnsw().is_graph_built(),
+        "reloaded index must have graph_built == true"
+    );
     assert_eq!(loaded.hnsw().entry_point(), idx.hnsw().entry_point());
     assert_eq!(loaded.hnsw().max_level(), idx.hnsw().max_level());
 

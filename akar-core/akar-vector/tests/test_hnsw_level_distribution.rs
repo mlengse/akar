@@ -18,10 +18,7 @@ fn test_hnsw_initial_node_level() {
         index.insert(v, 0);
 
         let ml = index.max_level();
-        assert!(
-            ml <= m_max,
-            "level {ml} must not exceed m_max {m_max}",
-        );
+        assert!(ml <= m_max, "level {ml} must not exceed m_max {m_max}",);
         level_counts[ml] += 1;
     }
 

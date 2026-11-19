@@ -118,18 +118,11 @@ pub fn parse(input: &str) -> Result<JsonValue, String> {
         .map(|(number, raw)| {
             let indent = raw.len() - raw.trim_start().len();
             let trimmed = raw.trim_start();
-            let blank = trimmed.is_empty()
-                || trimmed.starts_with('#')
-                || trimmed == "---"
-                || trimmed == "...";
+            let blank = trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" || trimmed == "...";
             Line {
                 number: number + 1,
                 indent: if blank { usize::MAX } else { indent },
-                content: if blank {
-                    String::new()
-                } else {
-                    trimmed.to_string()
-                },
+                content: if blank { String::new() } else { trimmed.to_string() },
                 blank,
             }
         })
@@ -180,12 +173,7 @@ fn parse_mapping(lines: &[Line], cursor: &mut usize, indent: usize) -> Result<Js
     Ok(JsonValue::Object(map))
 }
 
-fn parse_value_member(
-    lines: &[Line],
-    cursor: &mut usize,
-    key_indent: usize,
-    rest: &str,
-) -> Result<JsonValue, String> {
+fn parse_value_member(lines: &[Line], cursor: &mut usize, key_indent: usize, rest: &str) -> Result<JsonValue, String> {
     let rest = rest.trim();
     if rest.is_empty() {
         *cursor += 1;
@@ -210,11 +198,7 @@ fn block_marker(text: &str) -> bool {
 }
 
 fn require(condition: bool, message: impl FnOnce() -> String) -> Result<(), String> {
-    if condition {
-        Ok(())
-    } else {
-        Err(message())
-    }
+    if condition { Ok(()) } else { Err(message()) }
 }
 
 fn parse_sequence(lines: &[Line], cursor: &mut usize, indent: usize) -> Result<JsonValue, String> {
@@ -262,11 +246,7 @@ fn parse_sequence(lines: &[Line], cursor: &mut usize, indent: usize) -> Result<J
     Ok(JsonValue::Array(items))
 }
 
-fn parse_sequence_map(
-    lines: &[Line],
-    cursor: &mut usize,
-    list_indent: usize,
-) -> Result<JsonValue, String> {
+fn parse_sequence_map(lines: &[Line], cursor: &mut usize, list_indent: usize) -> Result<JsonValue, String> {
     let deeper = list_indent + 2;
     let dash = &lines[*cursor];
     let rest = dash.content[2..].trim().to_string();
@@ -314,12 +294,7 @@ fn parse_item_pair(
     Ok(())
 }
 
-fn gather_block(
-    lines: &[Line],
-    cursor: &mut usize,
-    key_indent: usize,
-    marker: &str,
-) -> Result<JsonValue, String> {
+fn gather_block(lines: &[Line], cursor: &mut usize, key_indent: usize, marker: &str) -> Result<JsonValue, String> {
     if *cursor >= lines.len() || lines[*cursor].indent <= key_indent {
         return Ok(JsonValue::String(String::new()));
     }

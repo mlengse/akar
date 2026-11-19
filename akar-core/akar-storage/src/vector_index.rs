@@ -287,69 +287,70 @@ impl VectorIndexTable {
         }
 
         // Serialize and write connection pages if graph topology is built
-        let (conn_page_start, conn_page_count, format_version) = if let Some((_ep, _max_level, ref conns)) = graph_topology {
-            let start_p = page_idx;
-            let mut conn_offset = 0usize;
-            let total_nodes = conns.len();
-
-            while conn_offset < total_nodes {
-                let frame = bm
-                    .pin_mut(&self.file_name, page_idx)
-                    .map_err(|e| StorageError::Index(format!("Failed to pin connection page {page_idx}: {e}")))?;
-                let page_data = &mut frame.data;
-                let capacity = page_data.len();
-                page_data.fill(0u8);
-                let mut pos = 0usize;
-                let mut written_this_page = 0usize;
+        let (conn_page_start, conn_page_count, format_version) =
+            if let Some((_ep, _max_level, ref conns)) = graph_topology {
+                let start_p = page_idx;
+                let mut conn_offset = 0usize;
+                let total_nodes = conns.len();
 
                 while conn_offset < total_nodes {
-                    let (id, ref levels) = conns[conn_offset];
-                    let num_levels = levels.len();
-                    let mut entry_len = 8 + 2;
-                    for l in levels {
-                        entry_len += 2 + l.len() * 8;
-                    }
+                    let frame = bm
+                        .pin_mut(&self.file_name, page_idx)
+                        .map_err(|e| StorageError::Index(format!("Failed to pin connection page {page_idx}: {e}")))?;
+                    let page_data = &mut frame.data;
+                    let capacity = page_data.len();
+                    page_data.fill(0u8);
+                    let mut pos = 0usize;
+                    let mut written_this_page = 0usize;
 
-                    if pos + entry_len > capacity {
-                        if written_this_page == 0 {
-                            bm.unpin(&self.file_name, page_idx);
-                            return Err(StorageError::Index(format!(
-                                "Connections for node {id} ({entry_len} bytes) do not fit in a {capacity} byte page"
-                            )));
+                    while conn_offset < total_nodes {
+                        let (id, ref levels) = conns[conn_offset];
+                        let num_levels = levels.len();
+                        let mut entry_len = 8 + 2;
+                        for l in levels {
+                            entry_len += 2 + l.len() * 8;
                         }
-                        break;
-                    }
 
-                    // Write node id
-                    page_data[pos..pos + 8].copy_from_slice(&(id as u64).to_le_bytes());
-                    pos += 8;
-                    // Write num_levels
-                    page_data[pos..pos + 2].copy_from_slice(&(num_levels as u16).to_le_bytes());
-                    pos += 2;
-                    // Write levels
-                    for l in levels {
-                        let conn_count = l.len() as u16;
-                        page_data[pos..pos + 2].copy_from_slice(&conn_count.to_le_bytes());
+                        if pos + entry_len > capacity {
+                            if written_this_page == 0 {
+                                bm.unpin(&self.file_name, page_idx);
+                                return Err(StorageError::Index(format!(
+                                    "Connections for node {id} ({entry_len} bytes) do not fit in a {capacity} byte page"
+                                )));
+                            }
+                            break;
+                        }
+
+                        // Write node id
+                        page_data[pos..pos + 8].copy_from_slice(&(id as u64).to_le_bytes());
+                        pos += 8;
+                        // Write num_levels
+                        page_data[pos..pos + 2].copy_from_slice(&(num_levels as u16).to_le_bytes());
                         pos += 2;
-                        for &neighbor_id in l {
-                            page_data[pos..pos + 8].copy_from_slice(&(neighbor_id as u64).to_le_bytes());
-                            pos += 8;
+                        // Write levels
+                        for l in levels {
+                            let conn_count = l.len() as u16;
+                            page_data[pos..pos + 2].copy_from_slice(&conn_count.to_le_bytes());
+                            pos += 2;
+                            for &neighbor_id in l {
+                                page_data[pos..pos + 8].copy_from_slice(&(neighbor_id as u64).to_le_bytes());
+                                pos += 8;
+                            }
                         }
+
+                        written_this_page += 1;
+                        conn_offset += 1;
                     }
 
-                    written_this_page += 1;
-                    conn_offset += 1;
+                    frame.is_dirty = true;
+                    bm.unpin(&self.file_name, page_idx);
+                    page_idx += 1;
                 }
 
-                frame.is_dirty = true;
-                bm.unpin(&self.file_name, page_idx);
-                page_idx += 1;
-            }
-
-            (start_p, page_idx - start_p, FORMAT_VERSION_GRAPH_V2)
-        } else {
-            (0, 0, FORMAT_VERSION_LEGACY)
-        };
+                (start_p, page_idx - start_p, FORMAT_VERSION_GRAPH_V2)
+            } else {
+                (0, 0, FORMAT_VERSION_LEGACY)
+            };
 
         // Write header page with complete page counts and format version
         let header = serialize_header(

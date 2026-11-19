@@ -745,9 +745,7 @@ mod tests {
 
     #[test]
     fn test_unsupported_constructs_skipped() {
-        let frontmatter = frontmatter_of(
-            "---\nanchored: &anchor value\nempty:\n---\n",
-        );
+        let frontmatter = frontmatter_of("---\nanchored: &anchor value\nempty:\n---\n");
         assert!(frontmatter.get("anchored").is_none());
         assert_eq!(frontmatter.get("empty"), Some(&FrontMatterValue::Scalar(String::new())));
         assert_eq!(frontmatter.len(), 1);
@@ -755,9 +753,7 @@ mod tests {
 
     #[test]
     fn test_nested_maps_and_okf_frontmatter() {
-        let frontmatter = frontmatter_of(
-            "---\nnested:\n  a: 1\n  b: 2\nflow: [1, 2]\n---\n",
-        );
+        let frontmatter = frontmatter_of("---\nnested:\n  a: 1\n  b: 2\nflow: [1, 2]\n---\n");
         assert!(frontmatter.get("nested").is_some());
         assert_eq!(
             frontmatter.get_nested(&["nested", "a"]),
