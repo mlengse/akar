@@ -15,7 +15,7 @@ arrow.workspace = true
 akar-common = { path = "../akar-common", version = "0.3.4" }
 akar-function = { path = "../akar-function", version = "0.3.4" }
 akar-extension = { path = "../akar-extension", version = "0.3.4" }
-rusqlite = { version = "0.42.0", features = ["bundled"], optional = true }
+rusqlite = { version = "0.43.0", features = ["bundled"], optional = true }
 tracing.workspace = true
 
 [features]
